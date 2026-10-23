@@ -1,0 +1,229 @@
+<!doctype html>
+<!--
+  FirstM0 聊天页 —— M0 阶段的占位版本。
+  职责：验证「前端 → 后端接口 → 前端」这条链路是否打通。
+  注意：现在调用的还是 /api/hello；到 M0.5 会改成真正的聊天页，调用 POST /api/chat。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FirstM0 · AI 客服骨架</title>
+  <style>
+    /* 主题配色变量：只改这里就能整体换肤，下面所有颜色都引用这些变量 */
+    :root {
+      --bg: #0f172a;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --user: #1d4ed8;
+      --bot: #1e293b;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+      display: flex;
+      justify-content: center;
+      font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.18), transparent 28%),
+        radial-gradient(circle at 90% 100%, rgba(37, 99, 235, 0.22), transparent 30%),
+        var(--bg);
+    }
+
+    .app {
+      width: min(760px, 100%);
+      min-height: calc(100vh - 48px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: rgba(15, 23, 42, 0.78);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 20px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(16px);
+    }
+
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0.2px;
+    }
+
+    h1 span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .badge {
+      padding: 5px 10px;
+      border: 1px solid rgba(56, 189, 248, 0.5);
+      border-radius: 999px;
+      color: var(--accent);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    .bubble {
+      max-width: 82%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .bubble.bot {
+      align-self: flex-start;
+      background: var(--bot);
+      border-bottom-left-radius: 4px;
+    }
+
+    .bubble.user {
+      align-self: flex-end;
+      background: var(--user);
+      border-bottom-right-radius: 4px;
+    }
+
+    form {
+      display: flex;
+      gap: 10px;
+      padding: 16px;
+      border-top: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(2, 6, 23, 0.28);
+    }
+
+    input {
+      flex: 1;
+      min-width: 0;
+      padding: 12px 14px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 12px;
+      outline: none;
+      background: rgba(15, 23, 42, 0.8);
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    input:focus { border-color: var(--accent); }
+
+    button {
+      padding: 0 20px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #082f49;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:hover { filter: brightness(1.08); }
+
+    .hint {
+      margin: 0;
+      padding: 0 24px 16px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: rgba(148, 163, 184, 0.14);
+      color: #bae6fd;
+      font-family: Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>FirstM0 <span>AI 客服骨架</span></h1>
+        <p>Spring Boot 3.5 · Java 21 · Maven</p>
+      </div>
+      <span class="badge">M0</span>
+    </header>
+
+    <main id="messages">
+      <!-- 消息区：JS 会把用户/机器人气泡动态插入到这里 -->
+      <div class="bubble bot">你好，我是 M0 骨架。现在发送消息会调用 <code>/api/hello</code>，下一步再换成真正的大模型接口。</div>
+    </main>
+
+    <form id="chat-form">
+      <input id="message" autocomplete="off" placeholder="输入一句话，测试前后端是否打通…">
+      <button type="submit">发送</button>
+    </form>
+
+    <p class="hint">测试地址：<code>GET /api/hello?name=你的名字</code></p>
+  </div>
+
+  <script>
+    // 拿到页面上三个关键元素：表单、输入框、消息容器
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('message');
+    const messages = document.getElementById('messages');
+
+    // 监听表单提交：用户点“发送”或按回车都会走到这里
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();            // 阻止浏览器默认的“整页刷新”提交行为
+      const text = input.value.trim();   // 去掉首尾空格
+      if (!text) return;                 // 空内容不发请求
+
+      addBubble(text, 'user');           // 先把用户的话画成气泡（乐观显示，不用等后端）
+      input.value = '';                  // 清空输入框
+
+      try {
+        // 调后端接口：把用户输入当作 name 参数传过去；encodeURIComponent 防止中文等特殊字符出错
+        const response = await fetch('/api/hello?name=' + encodeURIComponent(text));
+        if (!response.ok) throw new Error('HTTP ' + response.status);  // 非 2xx 状态码视为失败
+        const data = await response.json();                             // 解析出 {"message": "..."}
+        addBubble(data.message, 'bot');                                 // 把后端回复画成机器人气泡
+      } catch (error) {
+        // 断网或后端报错时给出提示，避免页面“点了没反应”
+        addBubble('请求失败：' + error.message, 'bot');
+      }
+    });
+
+    // 往消息区追加一个气泡；role 决定气泡靠左（bot）还是靠右（user）
+    function addBubble(text, role) {
+      const div = document.createElement('div');
+      div.className = 'bubble ' + role;              // 用 class 控制样式和左右对齐
+      div.textContent = text;                        // 用 textContent 而不是 innerHTML，可避免 XSS
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;    // 滚到最底部，保证能看到最新消息
+    }
+  </script>
+</body>
+</html>

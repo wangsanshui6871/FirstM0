@@ -1,0 +1,9 @@
+# Spring Boot 主配置文件。放在 src/main/resources 下，启动时会被自动加载。
+spring:
+  application:
+    # 应用名：会出现在启动日志里，后续 Docker / 监控也会用到
+    name: first-m0
+
+server:
+  # 内嵌 Tomcat 的监听端口；页面和接口都从 http://localhost:8080 访问
+  port: 8080
