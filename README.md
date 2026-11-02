@@ -1,13 +1,14 @@
 # FirstM0
 
-M0 骨架：先把 Spring Boot 的前后端链路跑通，再一步一步扩展成 AI 智能客服项目。
+M0.1 骨架：前后端链路已打通，聊天接口先返回固定回复，下一步再逐步接数据库和大模型。
 
 当前版本刻意保持很小：
 
 - 一个 Spring Boot 启动类
-- 一个 `GET /api/hello` 接口
+- 一个 `GET /api/hello`（骨架验证用）
+- 一个 `POST /api/chat`（固定回复 + 参数校验）
 - 一个静态聊天页面
-- 一个应用上下文测试和一个接口测试
+- 5 个测试（上下文启动、hello 接口、chat 正常/空消息/超长消息）
 
 **现在还没有**：数据库、大模型、登录、RAG、Android。这些都在后面的 M0.x / M1 里加。
 
@@ -38,7 +39,7 @@ mvn spring-boot:run
 http://localhost:8080
 ```
 
-页面里输入一句话，会调用 `/api/hello` 并返回 `Hello, 你的输入!`。
+页面里输入一句话，会调用 `POST /api/chat` 并返回 `我收到了：你的输入`。
 
 ## Java 版本
 
@@ -63,6 +64,8 @@ IDEA 里还要确认：
 
 ## 接口
 
+### 1. 骨架验证
+
 ```http
 GET /api/hello?name=M0
 ```
@@ -75,37 +78,87 @@ GET /api/hello?name=M0
 }
 ```
 
+### 2. 聊天（M0.1）
+
+```http
+POST /api/chat
+Content-Type: application/json
+```
+
+请求体：
+
+```json
+{
+  "conversationId": null,
+  "message": "你好"
+}
+```
+
+返回：
+
+```json
+{
+  "conversationId": null,
+  "reply": "我收到了：你好"
+}
+```
+
+参数校验：
+
+- `message` 不能为空，最长 2000 字符
+- 校验失败返回 `400`，格式统一为：
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "消息不能为空"
+}
+```
+
+> M0.1 的 `conversationId` 目前原样回传（请求是 null，响应也是 null）。
+> M0.2 接入 MySQL 后会返回真实会话 id。
+
 ## 项目结构
 
 ```text
 src/main/java/com/example/firstm0/
 ├── FirstM0Application.java      # 启动类
 ├── controller/
-│   └── HelloController.java     # /api/hello
-└── dto/
-    └── HelloResponse.java       # 响应对象（record）
+│   ├── HelloController.java     # /api/hello（骨架验证）
+│   └── ChatController.java      # /api/chat（M0.1）
+├── service/
+│   └── ChatService.java         # 聊天业务逻辑（当前返回固定回复）
+├── dto/
+│   ├── HelloResponse.java       # hello 响应对象（record）
+│   ├── ChatRequest.java         # chat 请求体（含参数校验）
+│   └── ChatResponse.java        # chat 响应体
+└── common/
+    ├── ErrorResponse.java       # 统一错误响应 { code, message }
+    └── GlobalExceptionHandler.java  # 全局异常处理（400）
 
 src/main/resources/
 ├── application.yml              # 端口、应用名
-└── static/index.html            # 聊天页面（当前调用 hello 占位接口）
+└── static/index.html            # 聊天页面（调用 POST /api/chat）
 
 src/test/java/com/example/firstm0/
 ├── FirstM0ApplicationTests.java # 上下文启动测试
 └── controller/
-    └── HelloControllerTest.java # 接口测试
+    ├── HelloControllerTest.java # hello 接口测试
+    └── ChatControllerTest.java  # chat 接口测试（正常 / 空消息 / 超长）
 ```
 
-## 建议先弄懂这 5 个点
+## 建议先弄懂这 6 个点
 
 1. `@SpringBootApplication` 做了什么？
-2. `@RestController`、`@RequestMapping`、`@GetMapping` 分别是什么？
-3. `@RequestParam` 怎么接收参数？
-4. `record HelloResponse(String message)` 为什么能直接变成 JSON？
-5. `MockMvc` 测试是怎么验证接口的？
+2. `@RestController`、`@RequestMapping`、`@GetMapping` / `@PostMapping` 分别是什么？
+3. `@RequestBody` 怎么把 JSON 变成 record？
+4. `@Valid` + `@NotBlank` + `@Size` 是怎么触发校验的？
+5. `@RestControllerAdvice` 为什么能把异常统一成 `{ code, message }`？
+6. Controller → Service → DTO 的调用链是怎么走的？
 
 ## 下一步（按顺序）
 
-- **M0.1**：新增 `POST /api/chat`，先返回固定字符串
+- **M0.1**：`POST /api/chat` 固定回复 —— ✅ 已完成
 - **M0.2**：接 MySQL，保存会话和消息
 - **M0.3**：接大模型 API，把固定字符串换成真实回复
 - **M0.4**：加多轮历史

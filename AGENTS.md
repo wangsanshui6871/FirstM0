@@ -13,14 +13,15 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 
 ## 2. 当前真实状态
 
-已完成（M0 骨架）：
+已完成（M0 骨架 + M0.1）：
 
 - Java 21
 - Spring Boot 3.5.16
 - Maven
 - `GET /api/hello`
-- 静态聊天页 `src/main/resources/static/index.html`
-- 2 个测试：上下文启动、`/api/hello` 接口
+- `POST /api/chat`（固定回复 + `@Valid` 参数校验 + 全局异常处理）
+- 静态聊天页 `src/main/resources/static/index.html`（调用 `/api/chat`）
+- 5 个测试：上下文启动、`/api/hello`、chat 正常/空消息/超长消息
 - README
 
 尚未完成：
@@ -116,25 +117,19 @@ mvn spring-boot:run
 - 数据库表名、字段名用 snake_case；Java 字段用 camelCase。
 - 不要过度设计：没有第二个实现时，不要先写接口 + 工厂 + 策略。
 
-## 8. 下一步任务：M0.1
+## 8. 任务进度
 
-目标：新增 `POST /api/chat`，先返回固定回复，不接数据库、不接大模型。
+**M0.1 已完成**（`POST /api/chat` 固定回复 + 参数校验 + 全局异常处理 + 3 个测试）。
 
-要求：
+**下一步任务：M0.2** —— 接入 MySQL，把会话和消息存进数据库。
 
-- 新增 `ChatRequest`、`ChatResponse`、`ChatController`、`ChatService`
-- 请求：`{ "conversationId": null, "message": "你好" }`
-- 响应：`{ "conversationId": null, "reply": "我收到了：你好" }`
-- 校验 `message` 不能为空，最长 2000 字符
-- 加一个 `MockMvc` 测试
-- 静态页改成调用 `/api/chat`
-- 只新增 `spring-boot-starter-validation`；不引入 JPA、MySQL、LLM 依赖
+要求与验收标准见 `docs/PROJECT_PLAN.md` 的「M0.2 接入 MySQL」一节，此处不重复。
 
-验收：
+M0.2 范围提醒：
 
-- `mvn test` 通过
-- 页面输入一句话，能看到固定回复
-- 代码能讲清楚 Controller → Service → DTO 的调用链
+- 只新增 `spring-boot-starter-data-jpa`、`mysql-connector-j`，测试用 `com.h2database:h2`（test scope）
+- 不接大模型、不做流式输出、不做登录
+- 密码走环境变量，不写进代码、不提交 Git
 
 ## 9. 相关文档
 

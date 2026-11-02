@@ -1,8 +1,8 @@
 <!doctype html>
 <!--
-  FirstM0 聊天页 —— M0 阶段的占位版本。
-  职责：验证「前端 → 后端接口 → 前端」这条链路是否打通。
-  注意：现在调用的还是 /api/hello；到 M0.5 会改成真正的聊天页，调用 POST /api/chat。
+  FirstM0 聊天页 —— M0.1 版本。
+  职责：验证「前端 → POST /api/chat → 前端」这条链路是否打通。
+  后端现在返回固定回复；M0.5 会把这页做成真正可用的聊天页（loading、错误提示、新对话）。
 -->
 <html lang="zh-CN">
 <head>
@@ -173,12 +173,12 @@
         <h1>FirstM0 <span>AI 客服骨架</span></h1>
         <p>Spring Boot 3.5 · Java 21 · Maven</p>
       </div>
-      <span class="badge">M0</span>
+      <span class="badge">M0.1</span>
     </header>
 
     <main id="messages">
       <!-- 消息区：JS 会把用户/机器人气泡动态插入到这里 -->
-      <div class="bubble bot">你好，我是 M0 骨架。现在发送消息会调用 <code>/api/hello</code>，下一步再换成真正的大模型接口。</div>
+      <div class="bubble bot">你好，我是 M0.1 骨架。现在发送消息会调用 <code>POST /api/chat</code>，后端只做固定回复，还没接大模型。</div>
     </main>
 
     <form id="chat-form">
@@ -186,7 +186,7 @@
       <button type="submit">发送</button>
     </form>
 
-    <p class="hint">测试地址：<code>GET /api/hello?name=你的名字</code></p>
+    <p class="hint">测试接口：<code>POST /api/chat</code>，请求体 <code>{"conversationId": null, "message": "你好"}</code></p>
   </div>
 
   <script>
@@ -205,11 +205,22 @@
       input.value = '';                  // 清空输入框
 
       try {
-        // 调后端接口：把用户输入当作 name 参数传过去；encodeURIComponent 防止中文等特殊字符出错
-        const response = await fetch('/api/hello?name=' + encodeURIComponent(text));
-        if (!response.ok) throw new Error('HTTP ' + response.status);  // 非 2xx 状态码视为失败
-        const data = await response.json();                             // 解析出 {"message": "..."}
-        addBubble(data.message, 'bot');                                 // 把后端回复画成机器人气泡
+        // 调后端接口：POST + JSON 请求体（不再是 GET 拼 URL 参数了）
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // M0.1 还没有会话概念，conversationId 固定传 null
+          body: JSON.stringify({ conversationId: null, message: text })
+        });
+
+        // 非 2xx：后端会返回统一的 { code, message }，优先把 message 展示给用户
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => null);
+          throw new Error(errorBody?.message || 'HTTP ' + response.status);
+        }
+
+        const data = await response.json();      // 解析出 {"conversationId": null, "reply": "..."}
+        addBubble(data.reply, 'bot');            // 把后端回复画成机器人气泡
       } catch (error) {
         // 断网或后端报错时给出提示，避免页面“点了没反应”
         addBubble('请求失败：' + error.message, 'bot');

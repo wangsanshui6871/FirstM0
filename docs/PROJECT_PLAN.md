@@ -1,7 +1,7 @@
 # FirstM0 项目规划（AI 智能客服）
 
 > 这是项目的主计划。AI 助手先读 `AGENTS.md`，再读本文件。
-> 当前状态：**M0 骨架已完成，下一步 M0.1**。
+> 当前状态：**M0.1 已完成，下一步 M0.2**。
 > 最后更新：2026-10-20。
 
 ## 0. 这份文档怎么用
@@ -82,9 +82,25 @@ Java 21 + Spring Boot 3 + MySQL + 大模型 API + RAG + SSE + JWT + Docker。
 - 2 个测试
 - README
 
-不再重复做。下一步从 M0.1 开始。
+不再重复做。M0.1 也已完成，下一步从 M0.2 开始。
 
-### M0.1 第一个业务接口：`POST /api/chat`
+### M0.1 第一个业务接口：`POST /api/chat`（已完成）
+
+已完成内容：
+
+- `controller/ChatController.java`、`service/ChatService.java`
+- `dto/ChatRequest.java`、`dto/ChatResponse.java`
+- `common/ErrorResponse.java`、`common/GlobalExceptionHandler.java`
+- `spring-boot-starter-validation` 依赖
+- `ChatControllerTest`：正常回复、空消息 400、超长消息 400（共 3 个用例）
+- 静态页改为调用 `POST /api/chat`
+- `mvn test`：5 个测试全部通过
+
+验收结果：
+
+- [x] `mvn test` 通过
+- [x] 页面输入"你好"，显示"我收到了：你好"
+- [x] 能解释 `@RequestBody`、`record`、`@Valid`、`@RestControllerAdvice`
 
 **目标**：理解 HTTP POST、JSON 请求体、DTO、Controller → Service 调用链。先不接数据库、不接大模型。
 
