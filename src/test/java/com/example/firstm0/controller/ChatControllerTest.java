@@ -1,14 +1,15 @@
 package com.example.firstm0.controller;
 
+import com.example.firstm0.dto.ChatResponse;
 import com.example.firstm0.service.ChatService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -16,22 +17,30 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * ChatController 的接口测试。
  *
- * <p>@WebMvcTest 只加载 Web 层（Controller + 全局异常处理），不会自动加载 @Service，
- * 所以用 @Import(ChatService.class) 手动把业务类加进来。
- * 到 M0.2 接入数据库后，这里会改用 mock 来隔离数据库依赖。
+ * <p>@WebMvcTest 只加载 Web 层（Controller + 全局异常处理），不会加载 Service 和数据库。
+ * M0.2 的 Service 依赖 Repository，直接加载会很麻烦，
+ * 所以用 @MockitoBean 造一个假的 ChatService，让测试只关心“接口格式对不对”。
+ * 真实的数据库存取，放在 ChatServiceTest 里单独测。
  */
 @WebMvcTest(ChatController.class)
-@Import(ChatService.class)
 class ChatControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
+    /** 假的 Service：不会真的连数据库。 */
+    @MockitoBean
+    private ChatService chatService;
+
     /**
-     * 正常请求：应返回 200，reply 为固定格式，conversationId 为 null。
+     * 正常请求：应返回 200、固定格式的回复，以及真实的 conversationId。
      */
     @Test
-    void returnsFixedReply() throws Exception {
+    void returnsReplyWithConversationId() throws Exception {
+        // 约定：第一次聊天 conversationId 传 null，Service 返回新建会话的 id
+        when(chatService.chat(null, "你好"))
+                .thenReturn(new ChatResponse(1L, "我收到了：你好"));
+
         String body = """
                 {"conversationId": null, "message": "你好"}
                 """;
@@ -41,11 +50,12 @@ class ChatControllerTest {
                         .content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reply").value("我收到了：你好"))
-                .andExpect(jsonPath("$.conversationId").value(nullValue()));
+                .andExpect(jsonPath("$.conversationId").value(1));
     }
 
     /**
      * 空消息（全是空格）：@NotBlank 应拦下，返回 400。
+     * 注意：校验失败时根本不会进 Service，所以不需要 stub。
      */
     @Test
     void rejectsBlankMessage() throws Exception {

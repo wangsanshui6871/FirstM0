@@ -60,4 +60,18 @@ public class GlobalExceptionHandler {
 
         return new ErrorResponse("INVALID_REQUEST_BODY", "请求体格式不正确，应为 JSON");
     }
+
+    /**
+     * 处理会话不存在：请求里带了 conversationId，但数据库查不到。
+     *
+     * <p>这是“客户端给错了资源 id”，属于 404（Not Found），不是服务端故障，
+     * 所以不要返回 500。
+     */
+    @ExceptionHandler(ConversationNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleConversationNotFound(ConversationNotFoundException exception) {
+        log.warn("会话不存在: {}", exception.getMessage());
+
+        return new ErrorResponse("CONVERSATION_NOT_FOUND", exception.getMessage());
+    }
 }

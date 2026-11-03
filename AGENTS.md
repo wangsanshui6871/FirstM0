@@ -13,30 +13,32 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 
 ## 2. 当前真实状态
 
-已完成（M0 骨架 + M0.1）：
+已完成（M0 骨架 + M0.1 + M0.2）：
 
 - Java 21
 - Spring Boot 3.5.16
 - Maven
+- MySQL 8（库名 `first_m0`）
 - `GET /api/hello`
-- `POST /api/chat`（固定回复 + `@Valid` 参数校验 + 全局异常处理）
+- `POST /api/chat`（参数校验 + 会话/消息落库 + 返回真实 `conversationId`）
+- `GET /api/conversations/{id}/messages`（查历史，会话不存在返回 404）
+- 实体 `Conversation`、`Message`、`MessageRole` + 两个 JPA Repository
 - 静态聊天页 `src/main/resources/static/index.html`（调用 `/api/chat`）
-- 5 个测试：上下文启动、`/api/hello`、chat 正常/空消息/超长消息
-- README
+- 11 个测试：上下文启动、hello、chat 正常/空消息/超长、历史 200/404、数据库读写 4 个
+- README、`docs/PROJECT_PLAN.md`
 
 尚未完成：
 
-- MySQL
 - 大模型调用
 - 登录
-- 多轮历史
+- 多轮上下文控制
 - RAG 知识库
 - 转人工工单
 - 管理后台
 - Android
 - Docker
 
-当前 Git 尚未初始化（机器没有配置 `user.name` / `user.email`）。
+Git 已初始化并推送到 https://github.com/wangsanshui6871/FirstM0（main 分支）。
 
 ## 3. 技术栈约束
 
@@ -83,11 +85,13 @@ src/main/java/com/example/firstm0/
 
 ```powershell
 cd D:\IT\FirstM0
+$env:DB_PASSWORD = "你的 MySQL 密码"   # 不要写进任何文件
 mvn test
 mvn spring-boot:run
 ```
 
 打开 `http://localhost:8080`。  
+`mvn test` 使用 `src/test/resources/application.yml` 里的 H2 内存库，不需要本机 MySQL。  
 每次改完代码必须运行 `mvn test`；如果失败，先修复，不要继续加功能。
 
 ## 6. 协作规则（最重要）
@@ -119,17 +123,18 @@ mvn spring-boot:run
 
 ## 8. 任务进度
 
-**M0.1 已完成**（`POST /api/chat` 固定回复 + 参数校验 + 全局异常处理 + 3 个测试）。
+**M0.2 已完成**（MySQL 落库 + `GET /api/conversations/{id}/messages` + 11 个测试）。
 
-**下一步任务：M0.2** —— 接入 MySQL，把会话和消息存进数据库。
+**下一步任务：M0.3** —— 接入大模型，把固定回复换成真实 LLM 回复，并处理超时/错误/空回复。
 
-要求与验收标准见 `docs/PROJECT_PLAN.md` 的「M0.2 接入 MySQL」一节，此处不重复。
+要求与验收标准见 `docs/PROJECT_PLAN.md` 的「M0.3 接入大模型」一节，此处不重复。
 
-M0.2 范围提醒：
+M0.3 范围提醒：
 
-- 只新增 `spring-boot-starter-data-jpa`、`mysql-connector-j`，测试用 `com.h2database:h2`（test scope）
-- 不接大模型、不做流式输出、不做登录
-- 密码走环境变量，不写进代码、不提交 Git
+- 只新增 `llm/LlmClient.java`、`llm/OpenAiCompatibleClient.java`、`config/LlmProperties.java`
+- HTTP 用 Spring `RestClient`，不引入 Spring AI / LangChain4j
+- `LLM_API_KEY` 只走环境变量，不写进代码或 Git
+- 不顺手做多轮上下文（那是 M0.4）
 
 ## 9. 相关文档
 

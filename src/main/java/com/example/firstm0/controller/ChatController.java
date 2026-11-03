@@ -43,10 +43,7 @@ public class ChatController {
      */
     @PostMapping("/chat")
     public ChatResponse chat(@Valid @RequestBody ChatRequest request) {
-        // 交给 Service 处理业务，Controller 不关心它怎么生成回复
-        String reply = chatService.generateReply(request.message());
-
-        // M0.1 直接把请求里的 conversationId 原样返回；M0.2 会换成数据库生成的真实 id
-        return new ChatResponse(request.conversationId(), reply);
+        // 交给 Service 处理：建会话、存两条消息、生成回复，返回真实 conversationId
+        return chatService.chat(request.conversationId(), request.message());
     }
 }

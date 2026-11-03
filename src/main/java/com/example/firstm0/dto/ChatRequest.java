@@ -13,14 +13,15 @@ import jakarta.validation.constraints.Size;
  *
  * <p>字段说明：
  * <ul>
- *   <li>conversationId：会话 id。M0.1 阶段还没有数据库，所以允许为 null；M0.2 接入 MySQL 后才用它关联历史消息。</li>
+ *   <li>conversationId：会话 id。第一次聊天传 null，服务端会新建会话并返回真实 id；
+ *       继续同一段对话时传上一次返回的 id，服务端会往同一个会话里追加消息。</li>
  *   <li>message：用户这次说的话，必填，最长 2000 字符。</li>
  * </ul>
  *
  * <p>校验注解本身不会自动生效，必须在 Controller 的参数上再加 @Valid 才会触发。
  */
 public record ChatRequest(
-        // 会话 id，可以为 null（M0.1 还没有会话表）
+        // 会话 id，可以为 null（第一次聊天时由服务端新建会话）
         Long conversationId,
 
         // @NotBlank：不能为 null、不能是空串、不能全是空格

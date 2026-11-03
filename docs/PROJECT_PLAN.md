@@ -1,8 +1,8 @@
 # FirstM0 项目规划（AI 智能客服）
 
 > 这是项目的主计划。AI 助手先读 `AGENTS.md`，再读本文件。
-> 当前状态：**M0.1 已完成，下一步 M0.2**。
-> 最后更新：2026-10-20。
+> 当前状态：**M0.2 已完成，下一步 M0.3**。
+> 最后更新：2026-11-03。
 
 ## 0. 这份文档怎么用
 
@@ -59,7 +59,7 @@ Java 21 + Spring Boot 3 + MySQL + 大模型 API + RAG + SSE + JWT + Docker。
 |---|---|---|---|
 | M0 | 骨架 | Spring Boot + 静态页 + `/api/hello` | 已完成 |
 | M0.1 | 第一个业务接口 | `POST /api/chat` 固定回复 | 1～2 天 |
-| M0.2 | 接数据库 | MySQL 存会话和消息 | 3～5 天 |
+| M0.2 | 接数据库 | MySQL 存会话和消息 | 已完成 |
 | M0.3 | 接大模型 | 真实 LLM 回复 + 超时/降级 | 3～5 天 |
 | M0.4 | 多轮对话 | 最近 N 条历史 + 上下文控制 | 2 天 |
 | M0.5 | 聊天页 | 页面调用 `/api/chat` | 2 天 |
@@ -152,7 +152,27 @@ Content-Type: application/json
 
 **不要做**：JPA、MySQL、LLM、SSE、登录。
 
-### M0.2 接入 MySQL
+### M0.2 接入 MySQL（已完成，2026-11-03）
+
+已完成内容：
+
+- 依赖：`spring-boot-starter-data-jpa`、`mysql-connector-j`、测试用 `h2`
+- 实体：`domain/Conversation.java`、`domain/Message.java`、`domain/MessageRole.java`
+- Repository：`ConversationRepository`、`MessageRepository`
+- Service：`ChatService` 改成“建会话 → 存 user 消息 → 生成回复 → 存 assistant 消息”
+- 接口：`POST /api/chat` 返回真实 `conversationId`；新增 `GET /api/conversations/{id}/messages`
+- 异常：`ConversationNotFoundException` → 404 `CONVERSATION_NOT_FOUND`
+- 配置：`application.yml` 用 `${DB_USERNAME:root}` / `${DB_PASSWORD:}`；测试用 H2
+- 测试：11 个全部通过（含 4 个真实 JPA + H2 落库测试）
+
+验收结果：
+
+- [x] `mvn test` 通过（11 个测试）
+- [x] 本机 MySQL `first_m0` 库中能看到 `conversation`、`message` 数据
+- [x] 重启应用后 `GET /api/conversations/1/messages` 仍返回 2 条历史
+- [x] `role` 列为 `varchar(20)`，`message` 表有 `(conversation_id, id)` 复合索引
+- [x] 中文以 utf8mb4 正确落库
+- [x] 密码未写进代码或 Git，通过 `DB_PASSWORD` 环境变量传入
 
 **目标**：把会话和消息存进数据库，刷新/重启不丢。
 

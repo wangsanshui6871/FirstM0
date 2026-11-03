@@ -1,0 +1,16 @@
+# 测试专用配置。
+# 同名文件在 src/test/resources 下优先级更高，所以跑 mvn test 时会覆盖 src/main/resources/application.yml。
+# 这样测试用 H2 内存数据库，不需要本机装 MySQL、也不需要数据库密码。
+spring:
+  datasource:
+    # H2 跑在内存里，测试结束就消失；MODE=MySQL 让 H2 尽量兼容 MySQL 语法
+    url: 'jdbc:h2:mem:firstm0;MODE=MySQL;DB_CLOSE_DELAY=-1'
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ''
+
+  jpa:
+    hibernate:
+      # 每个测试类启动时建表，结束后删表，保证测试数据互不影响
+      ddl-auto: create-drop
+    open-in-view: false
