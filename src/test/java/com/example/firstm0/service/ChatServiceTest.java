@@ -4,25 +4,29 @@ import com.example.firstm0.common.ConversationNotFoundException;
 import com.example.firstm0.domain.Message;
 import com.example.firstm0.domain.MessageRole;
 import com.example.firstm0.dto.ChatResponse;
+import com.example.firstm0.llm.LlmClient;
+import com.example.firstm0.llm.LlmException;
 import com.example.firstm0.repository.MessageRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
 /**
- * ChatService 的数据库测试。
+ * ChatService 的业务测试。
  *
- * <p>@SpringBootTest 会启动完整的 Spring 上下文（包括 JPA 和 H2 内存数据库），
- * 这样测的是真实的“存库”行为，不是假数据。
+ * <p>@SpringBootTest 启动完整上下文（JPA + H2）；
+ * 但大模型用 @MockitoBean 换掉，测试不会真的发网络请求、不会花钱、也不需要 Key。
  *
- * <p>@Transactional 加在测试类上：每个测试方法结束后自动回滚，
- * 测试数据不会留在库里，也不会互相干扰。
+ * <p>@Transactional 加在测试类上：每个测试方法结束后自动回滚，测试数据不残留。
  */
 @SpringBootTest
 @Transactional
@@ -34,22 +38,28 @@ class ChatServiceTest {
     @Autowired
     private MessageRepository messageRepository;
 
+    /** 假的模型客户端，由每个测试自己决定返回什么。 */
+    @MockitoBean
+    private LlmClient llmClient;
+
     /**
-     * 第一次聊天：应新建会话，并保存“用户消息 + 机器人回复”两条记录。
+     * 第一次聊天：应新建会话，保存“用户消息 + 模型回复”两条记录。
      */
     @Test
     void createsConversationAndSavesTwoMessages() {
+        when(llmClient.chat(anyString(), anyString())).thenReturn("你好，我是客服助手，有什么可以帮你？");
+
         ChatResponse response = chatService.chat(null, "你好");
 
         assertThat(response.conversationId()).isNotNull();
-        assertThat(response.reply()).isEqualTo("我收到了：你好");
+        assertThat(response.reply()).isEqualTo("你好，我是客服助手，有什么可以帮你？");
 
         List<Message> messages = messageRepository.findByConversationIdOrderByIdAsc(response.conversationId());
         assertThat(messages).hasSize(2);
         assertThat(messages.get(0).getRole()).isEqualTo(MessageRole.USER);
         assertThat(messages.get(0).getContent()).isEqualTo("你好");
         assertThat(messages.get(1).getRole()).isEqualTo(MessageRole.ASSISTANT);
-        assertThat(messages.get(1).getContent()).isEqualTo("我收到了：你好");
+        assertThat(messages.get(1).getContent()).isEqualTo("你好，我是客服助手，有什么可以帮你？");
     }
 
     /**
@@ -57,6 +67,8 @@ class ChatServiceTest {
      */
     @Test
     void appendsMessagesToExistingConversation() {
+        when(llmClient.chat(anyString(), anyString())).thenReturn("好的");
+
         ChatResponse first = chatService.chat(null, "你好");
         ChatResponse second = chatService.chat(first.conversationId(), "再见");
 
@@ -65,6 +77,25 @@ class ChatServiceTest {
         List<Message> messages = messageRepository.findByConversationIdOrderByIdAsc(first.conversationId());
         assertThat(messages).hasSize(4);
         assertThat(messages.get(2).getContent()).isEqualTo("再见");
+    }
+
+    /**
+     * 模型调用失败：不应把异常抛给前端，而是返回兜底话术，
+     * 并且这条兜底话术也要落库，保证历史记录完整。
+     */
+    @Test
+    void returnsFallbackReplyWhenLlmFails() {
+        when(llmClient.chat(anyString(), anyString()))
+                .thenThrow(new LlmException("模型调用失败：timeout"));
+
+        ChatResponse response = chatService.chat(null, "你们支持退货吗");
+
+        assertThat(response.reply()).contains("人工客服");
+
+        List<Message> messages = messageRepository.findByConversationIdOrderByIdAsc(response.conversationId());
+        assertThat(messages).hasSize(2);
+        assertThat(messages.get(1).getRole()).isEqualTo(MessageRole.ASSISTANT);
+        assertThat(messages.get(1).getContent()).contains("人工客服");
     }
 
     /**

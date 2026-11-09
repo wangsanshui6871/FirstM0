@@ -6,30 +6,39 @@ import com.example.firstm0.domain.Message;
 import com.example.firstm0.domain.MessageRole;
 import com.example.firstm0.dto.ChatResponse;
 import com.example.firstm0.dto.MessageResponse;
+import com.example.firstm0.llm.LlmClient;
+import com.example.firstm0.llm.LlmException;
 import com.example.firstm0.repository.ConversationRepository;
 import com.example.firstm0.repository.MessageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 聊天业务逻辑。
  *
- * <p>Controller 只负责接请求、返响应，真正的业务都放在这里：
- * 新建会话、保存消息、生成回复（M0.3 会换成真实大模型调用）、查历史。
+ * <p>M0.3 起，回复不再固定，而是调用真实大模型。
  *
- * <p>M0.2 的流程：
+ * <p>关键设计：<b>把等模型的时间放在事务外面</b>。
+ * 一次模型调用可能几秒到几十秒，如果包在一个大事务里，
+ * 数据库连接会被一直占着，并发一高连接池就耗尽。
+ * 所以拆成三段：
  * <ol>
- *   <li>conversationId 为空 → 新建一个会话；不为空 → 查出已有会话（查不到抛 404）</li>
- *   <li>保存 user 消息</li>
- *   <li>生成回复（暂时还是固定格式）</li>
- *   <li>保存 assistant 消息</li>
- *   <li>返回 conversationId + reply</li>
+ *   <li>事务 1：建会话 + 保存用户消息，立即提交；</li>
+ *   <li>事务外：调用大模型（这一步不持有数据库事务）；</li>
+ *   <li>事务 2：保存机器人回复。</li>
  * </ol>
+ *
+ * <p>为什么用 {@link TransactionTemplate} 而不是在方法上加 {@code @Transactional}？
+ * 因为在同一个类里自己调自己的方法，{@code @Transactional} 是不生效的
+ * （Spring 的事务是代理实现的，自调用不会经过代理）。
+ * 用 TransactionTemplate 显式写明事务边界，既正确又直观。
  */
 @Service
 public class ChatService {
@@ -39,51 +48,55 @@ public class ChatService {
     /** 会话标题最长 100，和数据库字段长度保持一致。 */
     private static final int MAX_TITLE_LENGTH = 100;
 
+    /**
+     * 系统提示词：规定模型的角色和边界。
+     * M0.4 会在这里加上历史消息，M2 会加上知识库资料。
+     */
+    private static final String SYSTEM_PROMPT = """
+            你是「FirstM0」的客服助手。
+            回答要简洁、礼貌，只基于已知信息回答。
+            不知道答案时，明确说“这个问题我需要帮你转人工确认”，不要编造。
+            不要编造订单、物流、退款、价格信息。
+            """;
+
+    /** 模型不可用时的兜底回复，保证接口永远有内容返回，不把错误甩给用户。 */
+    private static final String FALLBACK_REPLY =
+            "抱歉，客服系统现在有点忙，请稍后再试。如果比较着急，建议联系人工客服。";
+
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
+    private final LlmClient llmClient;
+    private final TransactionTemplate transactionTemplate;
 
-    /** 构造器注入：Spring 启动时把两个 Repository 传进来。 */
     public ChatService(ConversationRepository conversationRepository,
-                       MessageRepository messageRepository) {
+                       MessageRepository messageRepository,
+                       LlmClient llmClient,
+                       PlatformTransactionManager transactionManager) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
+        this.llmClient = llmClient;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     /**
      * 处理一次用户发消息。
      *
-     * <p>{@code @Transactional} 表示这个方法里的数据库操作在同一个事务里：
-     * 要么全部成功，要么全部回滚，不会出现“用户消息存了、回复没存”的半截数据。
-     *
-     * <p>注意：M0.3 接大模型后，“等模型返回”不能放在这个大事务里，
-     * 否则数据库连接会被长时间占用，需要拆成“保存用户消息 → 调模型 → 保存回复”三段。
-     *
      * @param conversationId 会话 id，第一次聊天传 null
      * @param userMessage    用户消息（已由 Controller 校验）
      * @return 会话 id + 机器人回复
      */
-    @Transactional
     public ChatResponse chat(Long conversationId, String userMessage) {
-        LocalDateTime now = LocalDateTime.now();
+        // 第 1 段：事务内，建会话 + 存用户消息，提交后立刻释放连接
+        Long savedConversationId = Objects.requireNonNull(
+                transactionTemplate.execute(status -> saveUserTurn(conversationId, userMessage)));
 
-        // 1. 没有会话就新建；有会话就查出来，查不到说明前端传了个不存在的 id
-        Conversation conversation = findOrCreateConversation(conversationId, userMessage, now);
-
-        // 2. 先保存用户消息（即使后面生成回复失败，也能留下用户说过的话）
-        messageRepository.save(new Message(conversation.getId(), MessageRole.USER, userMessage, now));
-
-        // 3. 生成回复：M0.2 还是固定格式，M0.3 换成调用大模型
+        // 第 2 段：事务外，等模型返回；这一步可能很慢，但不占用数据库连接
         String reply = generateReply(userMessage);
 
-        // 4. 保存机器人回复
-        messageRepository.save(new Message(conversation.getId(), MessageRole.ASSISTANT, reply, LocalDateTime.now()));
+        // 第 3 段：事务内，存机器人回复并刷新会话更新时间
+        transactionTemplate.executeWithoutResult(status -> saveAssistantTurn(savedConversationId, reply));
 
-        // 5. 刷新会话的最后更新时间（实体在事务里，JPA 会自动更新这一行）
-        conversation.touch(LocalDateTime.now());
-
-        log.info("会话 {} 新增一轮对话，用户消息长度={}", conversation.getId(), userMessage.length());
-
-        return new ChatResponse(conversation.getId(), reply);
+        return new ChatResponse(savedConversationId, reply);
     }
 
     /**
@@ -104,30 +117,51 @@ public class ChatService {
                 .toList();
     }
 
-    private Conversation findOrCreateConversation(Long conversationId, String userMessage, LocalDateTime now) {
-        if (conversationId == null) {
-            // 第一次聊天：用用户第一句话当标题
-            return conversationRepository.save(new Conversation(titleFrom(userMessage), now));
-        }
+    /** 第一段事务：查/建会话，并存下用户这条消息。 */
+    private Long saveUserTurn(Long conversationId, String userMessage) {
+        LocalDateTime now = LocalDateTime.now();
 
-        return conversationRepository.findById(conversationId)
-                .orElseThrow(() -> new ConversationNotFoundException(conversationId));
+        Conversation conversation = (conversationId == null)
+                ? conversationRepository.save(new Conversation(titleFrom(userMessage), now))
+                : conversationRepository.findById(conversationId)
+                        .orElseThrow(() -> new ConversationNotFoundException(conversationId));
+
+        messageRepository.save(new Message(conversation.getId(), MessageRole.USER, userMessage, now));
+        conversation.touch(now);
+
+        return conversation.getId();
+    }
+
+    /** 第三段事务：存下机器人这条回复，同时刷新会话的最后更新时间。 */
+    private void saveAssistantTurn(Long conversationId, String reply) {
+        LocalDateTime now = LocalDateTime.now();
+
+        messageRepository.save(new Message(conversationId, MessageRole.ASSISTANT, reply, now));
+        conversationRepository.findById(conversationId).ifPresent(conversation -> conversation.touch(now));
+    }
+
+    /**
+     * 调用大模型生成回复。
+     *
+     * <p>失败不抛给前端：记一条 WARN 日志，返回兜底话术。
+     * 这样用户至少能看到“系统忙”，而不是一个 500 页面。
+     */
+    private String generateReply(String userMessage) {
+        try {
+            return llmClient.chat(SYSTEM_PROMPT, userMessage);
+        } catch (LlmException exception) {
+            log.warn("大模型调用失败，改用兜底回复: {}", exception.getMessage());
+
+            return FALLBACK_REPLY;
+        }
     }
 
     /** 用第一句话当标题，超长时截断，避免超过数据库字段长度。 */
     private String titleFrom(String userMessage) {
         String trimmed = userMessage.strip();
+
         return trimmed.length() <= MAX_TITLE_LENGTH
                 ? trimmed
                 : trimmed.substring(0, MAX_TITLE_LENGTH);
-    }
-
-    /**
-     * 生成回复。
-     *
-     * <p>M0.2 是固定格式的假回复；M0.3 会把这里替换成调用大模型。
-     */
-    private String generateReply(String userMessage) {
-        return "我收到了：" + userMessage;
     }
 }

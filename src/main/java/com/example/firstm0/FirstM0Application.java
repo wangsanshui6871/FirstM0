@@ -2,6 +2,7 @@ package com.example.firstm0;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
  * 应用启动类 —— 整个项目的入口。
@@ -12,9 +13,12 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  *   <li>@SpringBootApplication 开启「自动配置 + 组件扫描」，
  *       扫描范围是包 com.example.firstm0 及其所有子包；
  *       所以 controller / service 等包里的类，只要加了注解就会被自动装进 Spring 容器。</li>
+ *   <li>@ConfigurationPropertiesScan 会扫描所有带 @ConfigurationProperties 的类，
+ *       把它们注册成 Bean，比如 config 包下的 LlmProperties。</li>
  * </ul>
  */
 @SpringBootApplication
+@ConfigurationPropertiesScan
 public class FirstM0Application {
 
     public static void main(String[] args) {

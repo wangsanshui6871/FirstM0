@@ -1,8 +1,8 @@
 # FirstM0 项目规划（AI 智能客服）
 
 > 这是项目的主计划。AI 助手先读 `AGENTS.md`，再读本文件。
-> 当前状态：**M0.2 已完成，下一步 M0.3**。
-> 最后更新：2026-11-03。
+> 当前状态：**M0.3 已完成，下一步 M0.4**。
+> 最后更新：2026-11-09。
 
 ## 0. 这份文档怎么用
 
@@ -60,7 +60,7 @@ Java 21 + Spring Boot 3 + MySQL + 大模型 API + RAG + SSE + JWT + Docker。
 | M0 | 骨架 | Spring Boot + 静态页 + `/api/hello` | 已完成 |
 | M0.1 | 第一个业务接口 | `POST /api/chat` 固定回复 | 1～2 天 |
 | M0.2 | 接数据库 | MySQL 存会话和消息 | 已完成 |
-| M0.3 | 接大模型 | 真实 LLM 回复 + 超时/降级 | 3～5 天 |
+| M0.3 | 接大模型 | 真实 LLM 回复 + 超时/降级 | 已完成 |
 | M0.4 | 多轮对话 | 最近 N 条历史 + 上下文控制 | 2 天 |
 | M0.5 | 聊天页 | 页面调用 `/api/chat` | 2 天 |
 | M1 | 产品化 | JWT、会话列表、SSE、Docker | 1～2 周 |
@@ -248,7 +248,26 @@ spring:
 
 **注意**：不要在大事务里等 LLM 返回。先保存用户消息，再调模型，再保存回复。
 
-### M0.3 接入大模型
+### M0.3 接入大模型（已完成，2026-11-09）
+
+已完成内容：
+
+- `config/LlmProperties.java`：读取 `llm.*`，用 record + 紧凑构造器给默认值
+- `llm/LlmClient.java`：模型调用接口，Service 不感知 HTTP 细节
+- `llm/LlmException.java`：把 HTTP 错误、超时、空回复统一成一种异常
+- `llm/OpenAiCompatibleClient.java`：`RestClient` 调 `/v1/chat/completions`，连接超时 10 秒、读取 60 秒
+- `ChatService` 拆成三段：存用户消息（事务 1）→ 事务外调模型 → 存回复（事务 2），用 `TransactionTemplate` 显式控制事务边界
+- 失败降级：未配 Key、401、超时、空回复都返回兜底话术，接口仍是 200，兜底话术也会落库
+- `application.yml` 增加 `llm.*`，Key 只走 `LLM_API_KEY` 环境变量
+- 测试：16 个全部通过（新增模型客户端 4 个、失败降级 1 个）
+
+验收结果：
+
+- [x] `mvn test` 通过（16 个测试）
+- [x] 真实 DeepSeek Key 端到端成功：回复「你好，我是FirstM0的客服助手，很高兴为你服务。」
+- [x] 模型耗时约 866ms，日志记录 model、耗时、回复长度，不记录 Key
+- [x] 两条消息（USER / ASSISTANT）正确落库到 MySQL，`GET /api/conversations/4/messages` 能读回
+- [x] `LLM_API_KEY` 只在环境变量里，代码和 Git 中都没有
 
 **目标**：把固定回复换成真实 LLM 回复，并处理超时、错误和空回复。
 

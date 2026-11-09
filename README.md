@@ -1,17 +1,17 @@
 # FirstM0
 
-M0.2：聊天接口已接入 MySQL，会话和消息会真正落库，重启应用后还能查到历史。回复内容仍是固定格式，M0.3 再换成真实大模型。
+M0.3：聊天回复已换成真实大模型（DeepSeek），会话和消息照常落库。模型调用失败时会返回友好提示，不会把错误抛给用户。
 
 当前版本刻意保持很小：
 
 - 一个 Spring Boot 启动类
 - 一个 `GET /api/hello`（骨架验证用）
-- 一个 `POST /api/chat`（参数校验 + 会话/消息落库）
+- 一个 `POST /api/chat`（参数校验 + 会话/消息落库 + 真实模型回复）
 - 一个 `GET /api/conversations/{id}/messages`（查历史消息）
 - 一个静态聊天页面
-- 11 个测试（上下文启动、hello、chat 正常/空消息/超长、历史消息 200/404、数据库读写 4 个）
+- 16 个测试（上下文启动、hello、chat 正常/空消息/超长、历史消息 200/404、数据库读写 5 个、模型客户端 4 个）
 
-**现在还没有**：大模型、登录、多轮上下文、RAG、Android。这些都在后面的 M0.x / M1 里加。
+**现在还没有**：登录、多轮上下文、RAG、Android。这些都在后面的 M0.x / M1 里加。
 
 ## AI 接手入口
 
@@ -26,6 +26,7 @@ TraeCode 打开项目后，建议在 `设置 → 规则 → 导入设置` 中开
 - JDK 21
 - Maven 3.9+
 - MySQL 8（本地开发用）
+- 一个大模型 API Key（默认接入 DeepSeek）
 
 ## 启动
 
@@ -35,16 +36,25 @@ TraeCode 打开项目后，建议在 `设置 → 规则 → 导入设置` 中开
 CREATE DATABASE IF NOT EXISTS first_m0 DEFAULT CHARACTER SET utf8mb4;
 ```
 
+再配置两个环境变量（只需设置一次，之后新开的终端都能读到）：
+
+```powershell
+# 数据库密码，不要写进代码或配置文件
+setx DB_PASSWORD "你的 MySQL 密码"
+
+# 大模型 Key，只放环境变量，绝不提交 Git
+setx LLM_API_KEY "sk-你的DeepSeekKey"
+```
+
 然后在 `D:\IT\FirstM0` 下执行：
 
 ```powershell
-# 数据库密码通过环境变量传入，不要写进代码或配置文件
-$env:DB_PASSWORD = "你的 MySQL 密码"
 mvn spring-boot:run
 ```
 
-> 用户名默认是 `root`，想换就再设置 `$env:DB_USERNAME`。
+> 用户名默认是 `root`，想换就再设置 `DB_USERNAME`。
 > 表结构由 JPA 自动创建（`ddl-auto: update`），第一次启动会自动建 `conversation` 和 `message` 表。
+> 换模型厂商时改 `llm.base-url` / `llm.model` 即可，代码不用动。
 
 然后打开：
 
@@ -52,7 +62,9 @@ mvn spring-boot:run
 http://localhost:8080
 ```
 
-页面里输入一句话，会调用 `POST /api/chat` 并返回 `我收到了：你的输入`，同时把消息写进 MySQL。
+页面里输入一句话，会调用 `POST /api/chat`，由大模型生成回复，同时把两条消息写进 MySQL。
+
+> 注意：`setx` 设置的变量对已经打开的终端和 IDEA 不生效，需要重开终端或重启 IDEA。
 
 ## Java 版本
 
@@ -91,7 +103,7 @@ GET /api/hello?name=M0
 }
 ```
 
-### 2. 聊天（M0.2）
+### 2. 聊天（M0.3）
 
 ```http
 POST /api/chat
@@ -111,16 +123,18 @@ Content-Type: application/json
 
 ```json
 {
-  "conversationId": 1,
-  "reply": "我收到了：你好"
+  "conversationId": 4,
+  "reply": "你好，我是FirstM0的客服助手，很高兴为你服务。"
 }
 ```
 
 说明：
 
+- 回复由大模型生成；`system prompt` 规定它只基于已知信息回答，不知道就说转人工
 - `conversationId` 为 `null` 时新建会话，响应里返回真实 id
 - 想继续同一段对话，把上次返回的 id 带上即可
 - `conversationId` 不存在时返回 `404`
+- 模型超时、Key 错误、返回为空时，回复会变成兜底话术，接口仍然是 `200`
 
 参数校验：
 
@@ -137,15 +151,15 @@ Content-Type: application/json
 ### 3. 查历史消息（M0.2）
 
 ```http
-GET /api/conversations/1/messages
+GET /api/conversations/4/messages
 ```
 
 返回按时间从早到晚排列的消息数组：
 
 ```json
 [
-  { "id": 1, "role": "USER", "content": "你好", "createdAt": "2026-11-03T18:04:18" },
-  { "id": 2, "role": "ASSISTANT", "content": "我收到了：你好", "createdAt": "2026-11-03T18:04:18" }
+  { "id": 7, "role": "USER", "content": "你好，请用一句话介绍你自己", "createdAt": "2026-11-09T17:59:32.465836" },
+  { "id": 8, "role": "ASSISTANT", "content": "你好，我是FirstM0的客服助手，很高兴为你服务。", "createdAt": "2026-11-09T17:59:33.481215" }
 ]
 ```
 
@@ -168,7 +182,13 @@ src/main/java/com/example/firstm0/
 │   ├── ChatController.java      # /api/chat
 │   └── ConversationController.java  # /api/conversations/{id}/messages
 ├── service/
-│   └── ChatService.java         # 建会话、存消息、查历史（M0.3 在这里接大模型）
+│   └── ChatService.java         # 三段式：存消息 → 事务外调模型 → 存回复
+├── llm/
+│   ├── LlmClient.java           # 模型调用接口（Service 只依赖它）
+│   ├── LlmException.java        # 把 HTTP 错误/超时/空回复统一成一种异常
+│   └── OpenAiCompatibleClient.java  # 用 RestClient 调 OpenAI 兼容接口
+├── config/
+│   └── LlmProperties.java       # 读取 llm.* 配置
 ├── domain/
 │   ├── Conversation.java        # 会话实体 -> conversation 表
 │   ├── Message.java             # 消息实体 -> message 表
@@ -199,24 +219,26 @@ src/test/java/com/example/firstm0/
 │   ├── HelloControllerTest.java # hello 接口测试
 │   ├── ChatControllerTest.java  # chat 接口测试（正常 / 空消息 / 超长）
 │   └── ConversationControllerTest.java  # 历史消息 200 / 404
+├── llm/
+│   └── OpenAiCompatibleClientTest.java  # 用本地假服务器测 HTTP：正常/空回复/500/缺 Key
 └── service/
-    └── ChatServiceTest.java     # 真实 JPA + H2 的落库测试
+    └── ChatServiceTest.java     # 真实 JPA + H2 的落库测试 + 模型失败降级
 ```
 
 ## 建议先弄懂这 6 个点
 
-1. 实体（Entity）和 DTO 有什么区别？为什么不能把实体直接返回给前端？
-2. `@Entity`、`@Table`、`@Column` 是怎么把 Java 类映射成数据库表的？
-3. `JpaRepository` 和 `findByConversationIdOrderByIdAsc` 为什么不用写 SQL？
-4. `@Transactional` 什么时候生效？为什么以后调大模型不能放在大事务里？
-5. 为什么要在 `(conversation_id, id)` 上建复合索引？
-6. 为什么数据库密码只能走环境变量，不能写进 `application.yml`？
+1. 为什么要在 `ChatService` 里定义 `LlmClient` 接口，而不是直接写 HTTP 调用？
+2. 为什么调模型不能包在 `@Transactional` 里？数据库连接被长时间占用会怎样？
+3. 为什么同一个类里自己调自己的 `@Transactional` 方法不生效？`TransactionTemplate` 怎么解决？
+4. 超时为什么要分“连接超时”和“读取超时”？各自该设多少？
+5. 模型报错时为什么返回兜底话术，而不是把异常抛给前端？
+6. `LLM_API_KEY` 为什么只能走环境变量？日志里为什么不能打印完整 Key？
 
 ## 下一步（按顺序）
 
 - **M0.1**：`POST /api/chat` 固定回复 —— ✅ 已完成
 - **M0.2**：接 MySQL，保存会话和消息 —— ✅ 已完成
-- **M0.3**：接大模型 API，把固定字符串换成真实回复
+- **M0.3**：接大模型 API，把固定字符串换成真实回复 —— ✅ 已完成
 - **M0.4**：加多轮历史
 - **M0.5**：把静态页改成真正的聊天页
 - **M1**：SSE 流式输出、登录、会话列表、Docker
