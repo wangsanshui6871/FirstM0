@@ -13,7 +13,7 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 
 ## 2. 当前真实状态
 
-已完成（M0 骨架 + M0.1 ~ M0.5 + M1.1 + M1.2）：
+已完成（M0 骨架 + M0.1 ~ M0.5 + M1.1 ~ M1.3）：
 
 - Java 21
 - Spring Boot 3.5.16
@@ -32,13 +32,14 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 - 鉴权：`auth/AuthInterceptor` + `config/WebConfig`，`/api/**` 需登录，`/api/auth/**` 与 `/api/hello` 除外
 - 会话归属：`conversation.user_id`，所有查询都带 userId，别人的会话一律 404
 - 会话管理：`service/ConversationService`，列表 / 重命名 / 删除
+- 流式：`LlmClient.chatStream` + `POST /api/chat/stream`（SSE，事件 meta/delta/done/error）
+- 异步：`spring.threads.virtual.enabled=true`，推流跑在虚拟线程上
 - 密码用 BCrypt 加密存库，JWT 走 `jwt.*` 配置，密钥可用 `JWT_SECRET` 覆盖
-- 32 个测试：认证 5 个、chat 4 个、会话管理 8 个、上下文启动 1 个、hello 1 个、数据库与上下文 9 个、模型客户端 4 个
+- 35 个测试：认证 5 个、chat 5 个、会话管理 8 个、上下文启动 1 个、hello 1 个、数据库与上下文 9 个、模型客户端 6 个
 - README、`docs/PROJECT_PLAN.md`
 
 尚未完成：
 
-- SSE 流式输出（M1.3）
 - Docker（M1.4）
 - RAG 知识库
 - 转人工工单
@@ -131,18 +132,19 @@ mvn spring-boot:run
 
 ## 8. 任务进度
 
-**M1.2 已完成**（拦截器鉴权 + 会话归属 + 列表/重命名/删除 + 32 个测试）。
+**M1.3 已完成**（SSE 流式输出 + 虚拟线程 + 断线保留部分回复 + 35 个测试）。
 
-**下一步任务：M1.3** —— SSE 流式输出。
+**下一步任务：M1.4** —— Docker Compose，一条命令启动 app + MySQL。
 
-要求见 `docs/PROJECT_PLAN.md` 的「M1.3 SSE」一节。
+要求见 `docs/PROJECT_PLAN.md` 的「M1.4 Docker」一节。
 
-M1.3 范围提醒：
+M1.4 范围提醒：
 
-- 教学顺序：先做假流式（服务端每 100ms 吐一个字）→ 再接真实模型流式 → 最后处理断线/取消
-- 用 Spring 的 `SseEmitter`，不引入 WebSocket
-- 前端用 `EventSource` 无法带 Authorization 头，需要用 fetch + ReadableStream 或把 token 放 query（后者不推荐）
-- 不引入 Redis、消息队列
+- 先写 `Dockerfile`（多阶段构建：Maven 打包 → JRE 运行）
+- 再写 `docker-compose.yml`（app + mysql，带健康检查）
+- 数据库密码、JWT 密钥、LLM Key 全部走环境变量
+- 不在镜像里打包密钥
+- 不引入 K8s、Redis
 
 ## 9. 相关文档
 

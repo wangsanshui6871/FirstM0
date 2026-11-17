@@ -1,7 +1,7 @@
 # FirstM0 项目规划（AI 智能客服）
 
 > 这是项目的主计划。AI 助手先读 `AGENTS.md`，再读本文件。
-> 当前状态：**M1 进行中（M1.1、M1.2 已完成），下一步 M1.3**。
+> 当前状态：**M1 进行中（M1.1 ~ M1.3 已完成），下一步 M1.4**。
 > 最后更新：2026-11-17。
 
 ## 0. 这份文档怎么用
@@ -398,7 +398,7 @@ llm:
 |---|---|---|
 | M1.1 | 用户表 + 注册/登录 + JWT | 已完成 |
 | M1.2 | JWT 拦截器 + 会话归属用户 + 会话列表 | 已完成 |
-| M1.3 | SSE 流式输出 | 待做 |
+| M1.3 | SSE 流式输出 | 已完成 |
 | M1.4 | Docker Compose | 待做 |
 
 #### M1.1 注册登录（已完成，2026-11-17）
@@ -447,9 +447,27 @@ llm:
 - [x] 改名成功、删除后列表变 0
 - [x] 登录页跳转、退出登录、token 失效自动回登录页
 
-#### M1.3 SSE（待做）
+#### M1.3 SSE（已完成，2026-11-17）
 
-教学顺序：假流式 → 接真实模型流式 → 处理断线/取消。
+已完成内容：
+
+- `LlmClient.chatStream(messages, onDelta)`：模型每返回一小段就回调一次
+- `OpenAiCompatibleClient`：请求体加 `stream: true`，用 `exchange` 拿原始响应流，逐行解析 `data:` 分片
+- `ChatService.chatStreaming`：接受两个回调（会话就绪、片段到达），Service 不依赖 SseEmitter
+- `POST /api/chat/stream`：返回 `text/event-stream`，事件有 `meta` / `delta` / `done` / `error`
+- 推流放在独立线程（`spring.threads.virtual.enabled=true`，用虚拟线程），请求线程立刻归还
+- 开始推流前先同步校验会话归属，保证 404 能正常返回
+- 客户端中途断开时，把已经生成的部分存进数据库
+- 前端用 `fetch` + `ReadableStream` 读流（EventSource 不支持 POST 和自定义头），逐字追加
+- 测试：35 个全部通过（新增流式解析 2 个、流式 404 1 个）
+
+验收结果：
+
+- [x] `mvn test` 通过（35 个测试）
+- [x] 真实流式返回：`meta` + 14 个 `delta` + `done`
+- [x] 完整回复正确落库（会话 28，USER + ASSISTANT 两条）
+- [x] 会话不存在时推流前返回 404
+- [x] 能解释 SSE 与 WebSocket 的区别、为什么不用 EventSource
 
 #### M1.4 Docker（待做）
 

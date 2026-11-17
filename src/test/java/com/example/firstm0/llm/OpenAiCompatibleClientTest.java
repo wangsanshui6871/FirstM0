@@ -1,6 +1,7 @@
 package com.example.firstm0.llm;
 
 import com.example.firstm0.config.LlmProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,6 +11,7 @@ import org.springframework.web.client.RestClient;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -141,6 +143,39 @@ class OpenAiCompatibleClientTest {
     private LlmClient newClient(String apiKey) {
         LlmProperties properties = new LlmProperties(baseUrl, apiKey, "deepseek-chat", 5);
 
-        return new OpenAiCompatibleClient(properties, RestClient.builder());
+        return new OpenAiCompatibleClient(properties, RestClient.builder(), new ObjectMapper());
+    }
+
+    /**
+     * 流式响应：应逐块回调 onDelta，最后拼接成完整回复。
+     */
+    @Test
+    void streamsDeltasAndJoinsThem() {
+        statusCode = 200;
+        responseBody = "data: {\"choices\":[{\"delta\":{\"content\":\"你\"}}]}\n\n"
+                + "data: {\"choices\":[{\"delta\":{\"content\":\"好\"}}]}\n\n"
+                + "data: {\"choices\":[{\"delta\":{\"content\":\"呀\"}}]}\n\n"
+                + "data: [DONE]\n\n";
+
+        LlmClient client = newClient("test-key");
+        List<String> deltas = new ArrayList<>();
+
+        String reply = client.chatStream(MESSAGES, deltas::add);
+
+        assertThat(deltas).containsExactly("你", "好", "呀");
+        assertThat(reply).isEqualTo("你好呀");
+    }
+
+    /** 流式响应里没有任何内容：应抛 LlmException。 */
+    @Test
+    void throwsWhenStreamHasNoContent() {
+        statusCode = 200;
+        responseBody = "data: [DONE]\n\n";
+
+        LlmClient client = newClient("test-key");
+
+        assertThatThrownBy(() -> client.chatStream(MESSAGES, delta -> { }))
+                .isInstanceOf(LlmException.class)
+                .hasMessageContaining("空回复");
     }
 }

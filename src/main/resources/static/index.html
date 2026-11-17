@@ -245,6 +245,17 @@
       font-style: italic;
     }
 
+    /* 流式输出时的光标：让用户知道还在生成 */
+    .bubble.streaming::after {
+      content: '▍';
+      margin-left: 2px;
+      animation: blink 1s steps(2, start) infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
     form {
       display: flex;
       gap: 10px;
@@ -594,7 +605,7 @@
     }
 
     // ------------------------------------------------------------------
-    // 6. 发送消息
+    // 6. 发送消息（M1.3：SSE 流式）
     // ------------------------------------------------------------------
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -604,43 +615,124 @@
 
       addBubble(text, 'user');
       input.value = '';
-
       setBusy(true);
-      const typingBubble = addBubble('正在输入…', 'typing');
+
+      // 机器人气泡先建好，后面收到一段就追加一段
+      const botBubble = addBubble('', 'bot');
+      botBubble.classList.add('streaming');
+
+      let answer = '';
 
       try {
-        const response = await apiFetch('/api/chat', {
+        const token = localStorage.getItem(TOKEN_KEY);
+
+        // 不能用 EventSource：它只支持 GET，而且不能带 Authorization 头。
+        // 所以用 fetch 发 POST，再手动读响应流。
+        const response = await fetch('/api/chat/stream', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
           body: JSON.stringify({ conversationId: conversationId, message: text })
         });
+
+        if (response.status === 401) {
+          clearLoginState();
+          location.replace('/login.html');
+          return;
+        }
 
         if (!response.ok) {
           const errorBody = await response.json().catch(() => null);
           throw new Error(errorBody?.message || 'HTTP ' + response.status);
         }
 
-        const data = await response.json();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
 
-        conversationId = data.conversationId;
-        localStorage.setItem(CONVERSATION_KEY, String(conversationId));
-        updateSessionLabel();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        typingBubble.remove();
-        addBubble(data.reply, 'bot');
+          buffer += decoder.decode(value, { stream: true });
 
-        // 会话的更新时间变了，列表顺序会变；新建会话时也要让它出现在列表里
-        await loadConversations();
+          // SSE 的事件之间用空行分隔：event: xxx\ndata: {...}\n\n
+          let separator;
+          while ((separator = buffer.indexOf('\n\n')) >= 0) {
+            const rawEvent = buffer.slice(0, separator);
+            buffer = buffer.slice(separator + 2);
+
+            const event = parseSseEvent(rawEvent);
+            if (!event) continue;
+
+            if (event.name === 'meta') {
+              conversationId = event.data.conversationId;
+              localStorage.setItem(CONVERSATION_KEY, String(conversationId));
+              updateSessionLabel();
+            } else if (event.name === 'delta') {
+              answer += event.data.content;
+              botBubble.textContent = answer;
+              messages.scrollTop = messages.scrollHeight;
+            } else if (event.name === 'done') {
+              // 用服务端的完整回复兜底一次，防止中间丢包
+              answer = event.data.reply || answer;
+              botBubble.textContent = answer;
+              await loadConversations();
+            } else if (event.name === 'error') {
+              throw new Error(event.data.message || '生成失败');
+            }
+          }
+        }
+
+        if (!answer) {
+          botBubble.textContent = '没有收到回复，请稍后重试。';
+        }
+
       } catch (error) {
-        typingBubble.remove();
-        if (!error.message.includes('登录已过期')) {
-          addBubble('请求失败：' + error.message + '\n（检查后端是否启动，然后重试）', 'bot');
+        botBubble.classList.remove('streaming');
+
+        if (answer) {
+          // 已经显示了一部分：保留内容，只在后面提示中断
+          addBubble('（回复中断：' + error.message + '）', 'bot');
+        } else {
+          botBubble.textContent = '请求失败：' + error.message + '\n（检查后端是否启动，然后重试）';
         }
       } finally {
+        botBubble.classList.remove('streaming');
         setBusy(false);
         input.focus();
       }
     });
+
+    /**
+     * 把一段原始 SSE 文本解析成 { name, data }。
+     * 形如：
+     *   event:delta
+     *   data:{"content":"你"}
+     */
+    function parseSseEvent(rawEvent) {
+      const lines = rawEvent.split(/\r?\n/);
+      let name = 'message';
+      const dataLines = [];
+
+      lines.forEach((line) => {
+        if (line.startsWith('event:')) {
+          name = line.slice('event:'.length).trim();
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice('data:'.length).trim());
+        }
+      });
+
+      if (dataLines.length === 0) return null;
+
+      try {
+        return { name: name, data: JSON.parse(dataLines.join('\n')) };
+      } catch (error) {
+        return null;
+      }
+    }
 
     // ------------------------------------------------------------------
     // 7. 退出登录

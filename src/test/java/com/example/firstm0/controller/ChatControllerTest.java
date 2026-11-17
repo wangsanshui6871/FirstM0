@@ -1,15 +1,19 @@
 package com.example.firstm0.controller;
 
 import com.example.firstm0.auth.JwtService;
+import com.example.firstm0.common.ConversationNotFoundException;
 import com.example.firstm0.dto.ChatResponse;
 import com.example.firstm0.service.ChatService;
+import com.example.firstm0.service.ConversationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -38,6 +42,13 @@ class ChatControllerTest {
 
     @MockitoBean
     private ChatService chatService;
+
+    @MockitoBean
+    private ConversationService conversationService;
+
+    /** 流式接口把工作丢给这个线程池；测试里不需要真的执行，给个 mock 就行。 */
+    @MockitoBean
+    private AsyncTaskExecutor taskExecutor;
 
     @MockitoBean
     private JwtService jwtService;
@@ -77,6 +88,25 @@ class ChatControllerTest {
                                 """))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("TOKEN_INVALID"));
+    }
+
+    /**
+     * 流式接口：会话不存在时要在开始推流之前就返回 404。
+     */
+    @Test
+    void rejectsStreamingForUnknownConversation() throws Exception {
+        when(jwtService.parseUserId(TOKEN)).thenReturn(USER_ID);
+        doThrow(new ConversationNotFoundException(99L))
+                .when(conversationService).ensureOwned(USER_ID, 99L);
+
+        mockMvc.perform(post("/api/chat/stream")
+                        .header("Authorization", AUTH_HEADER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"conversationId": 99, "message": "在吗"}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_FOUND"));
     }
 
     /**

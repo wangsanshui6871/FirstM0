@@ -1,18 +1,18 @@
 # FirstM0
 
-M1.2：会话归属到用户。登录后才能聊天，每个人只看得到自己的会话，可以切换、重命名、删除。
+M1.3：回复改成流式输出。模型每生成一小段就推给页面，文字像打字一样逐步出现，不用干等。
 
 当前版本刻意保持很小：
 
 - 一个 Spring Boot 启动类
 - `POST /api/auth/register`、`POST /api/auth/login`（BCrypt 加密密码 + 签发 JWT）
-- 一个 `POST /api/chat`（登录校验 + 参数校验 + 落库 + 多轮上下文 + 真实模型回复 + 失败降级）
+- `POST /api/chat`（非流式）和 `POST /api/chat/stream`（SSE 流式）
 - 会话管理：列表、查历史、重命名、删除，全部只能操作自己的
-- 聊天页（左侧会话栏、localStorage 记会话、loading、错误提示、退出登录）
+- 聊天页（左侧会话栏、逐字显示、localStorage 记会话、退出登录）
 - 登录页（登录/注册切换）
-- 32 个测试（认证 5 个、chat 4 个、会话管理 8 个、上下文启动 1 个、hello 1 个、数据库与上下文 9 个、模型客户端 4 个）
+- 35 个测试（认证 5 个、chat 5 个、会话管理 8 个、上下文启动 1 个、hello 1 个、数据库与上下文 9 个、模型客户端 6 个）
 
-**现在还没有**：SSE 流式输出、Docker、RAG 知识库。这些在 M1.3 / M1.4 / M2 里加。
+**现在还没有**：Docker、RAG 知识库。这些在 M1.4 / M2 里加。
 
 ## AI 接手入口
 
@@ -192,6 +192,41 @@ Content-Type: application/json
 }
 ```
 
+### 2.1 流式聊天（M1.3）
+
+```http
+POST /api/chat/stream
+Content-Type: application/json
+Authorization: Bearer <token>
+```
+
+请求体和 `/api/chat` 一样。响应是 `text/event-stream`，边生成边推送：
+
+```text
+event:meta
+data:{"conversationId":28}
+
+event:delta
+data:{"content":"我是"}
+
+event:delta
+data:{"content":"First"}
+
+...
+
+event:done
+data:{"reply":"我是FirstM0的客服助手，很高兴为你解答已知问题。","conversationId":28}
+```
+
+| 事件 | 含义 |
+|---|---|
+| `meta` | 会话已创建或复用，返回 `conversationId` |
+| `delta` | 一小段文字，追加到气泡里 |
+| `done` | 生成结束，带完整回复 |
+| `error` | 生成失败，带提示消息 |
+
+注意：`data` 是 JSON，不是纯文本——文字里如果有换行，直接塞进 SSE 会破坏格式。
+
 ### 3. 会话管理（M1.2）
 
 以下接口都要带 `Authorization: Bearer <token>`，且只能操作自己的会话。
@@ -310,19 +345,19 @@ src/test/java/com/example/firstm0/
 
 ## 建议先弄懂这 6 个点
 
-1. 拦截器（`HandlerInterceptor`）和过滤器（`Filter`）有什么区别？各自适合做什么？
-2. 为什么查会话要用 `findByIdAndUserId`，而不是先 `findById` 再比较 `userId`？
-3. 别人的会话为什么返回 404 而不是 403？这两种状态码分别暴露了什么信息？
-4. JWT 是无状态的，那“主动让某个 token 失效”要怎么做？
-5. 删除会话时为什么先删消息再删会话？没有外键约束会留下什么？
-6. 前端怎么统一处理 401？为什么要在封装里做，而不是每个请求各写一遍？
+1. SSE 和 WebSocket 有什么区别？这个场景为什么选 SSE？
+2. 为什么前端不用 `EventSource`，而是用 `fetch` 自己读流？
+3. 为什么要把推流放到独立线程？不这么做 Tomcat 会怎样？
+4. `SseEmitter` 的超时时间设成 3 分钟，超时后会发生什么？
+5. 为什么 `delta` 的内容要用 JSON 包装，而不是直接发字符串？
+6. 用户在生成到一半时关掉页面，服务端怎么感知？已经生成的部分要不要存库？
 
 ## 下一步（按顺序）
 
 - **M0.1 ~ M0.5** —— ✅ 已完成
 - **M1.1**：注册 / 登录 / JWT —— ✅ 已完成
 - **M1.2**：会话隔离 + 会话列表/重命名/删除 —— ✅ 已完成
-- **M1.3**：SSE 流式输出
+- **M1.3**：SSE 流式输出 —— ✅ 已完成
 - **M1.4**：Docker Compose
 - **M2**：知识库 RAG、引用、拒答、转人工
 - **M3**：管理后台、工单、评测、部署、演示视频

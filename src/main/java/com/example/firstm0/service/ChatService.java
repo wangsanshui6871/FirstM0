@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * 聊天业务逻辑。
@@ -108,6 +109,64 @@ public class ChatService {
 
         // 第 3 段：事务内，存机器人回复并刷新会话更新时间
         transactionTemplate.executeWithoutResult(status -> saveAssistantTurn(savedConversationId, reply));
+
+        return new ChatResponse(savedConversationId, reply);
+    }
+
+    /**
+     * 流式处理一次用户发消息（M1.3）。
+     *
+     * <p>和 {@link #chat} 的区别只在于“怎么把回复给出去”：
+     * 这里每收到模型的一小段就通过 {@code onDelta} 推一次，前端可以逐字显示。
+     *
+     * <p>两个回调：
+     * <ul>
+     *   <li>{@code onConversationReady}：会话一创建就通知前端，让它先记住 id；</li>
+     *   <li>{@code onDelta}：每来一小段文字推一次。</li>
+     * </ul>
+     * Service 不依赖 SseEmitter，只依赖这两个函数式接口，
+     * 这样业务逻辑和“怎么推给浏览器”解耦，也方便测试。
+     *
+     * @return 完整回复（和非流式接口一样会落库）
+     */
+    public ChatResponse chatStreaming(Long userId, Long conversationId, String userMessage,
+                                      Consumer<Long> onConversationReady,
+                                      Consumer<String> onDelta) {
+        // 第 1 段：事务内，建会话 + 存用户消息
+        Long savedConversationId = Objects.requireNonNull(
+                transactionTemplate.execute(status -> saveUserTurn(userId, conversationId, userMessage)));
+
+        onConversationReady.accept(savedConversationId);
+
+        // 第 2 段：事务外，流式调模型
+        List<LlmMessage> prompt = buildPrompt(savedConversationId);
+
+        // 自己再攒一份：万一客户端中途断开，还能把已经生成的部分存进数据库
+        StringBuilder received = new StringBuilder();
+        String reply;
+
+        try {
+            reply = llmClient.chatStream(prompt, delta -> {
+                received.append(delta);
+                onDelta.accept(delta);
+            });
+        } catch (LlmException exception) {
+            log.warn("流式调用模型失败，改用兜底回复: {}", exception.getMessage());
+
+            reply = FALLBACK_REPLY;
+            onDelta.accept(reply);
+        } catch (RuntimeException exception) {
+            // 多半是客户端断开（关页面、断网），此时 onDelta 写不出去会抛异常
+            log.warn("流式推送中断: {}", exception.getMessage());
+
+            reply = received.isEmpty() ? FALLBACK_REPLY : received.toString();
+        }
+
+        // 第 3 段：事务内，存回复
+        Long finalConversationId = savedConversationId;
+        String finalReply = reply;
+        transactionTemplate.executeWithoutResult(
+                status -> saveAssistantTurn(finalConversationId, finalReply));
 
         return new ChatResponse(savedConversationId, reply);
     }

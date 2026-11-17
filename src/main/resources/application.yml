@@ -4,6 +4,12 @@ spring:
     # 应用名：会出现在启动日志里，后续 Docker / 监控也会用到
     name: first-m0
 
+  # M1.3 新增：异步任务使用虚拟线程
+  # 流式对话要把“等模型生成”放到后台线程，虚拟线程在这类 IO 等待场景开销极小
+  threads:
+    virtual:
+      enabled: true
+
   # M0.2 新增：数据源配置
   datasource:
     # 连接本机 MySQL 的 first_m0 库；参数含义：

@@ -73,6 +73,17 @@ public class ConversationService {
     }
 
     /**
+     * 只做归属校验，不返回实体。
+     *
+     * <p>流式接口需要：必须在开始推流之前把 404 抛出去，
+     * 否则响应已经是 200 了，再改状态码就来不及了。
+     */
+    @Transactional(readOnly = true)
+    public void ensureOwned(Long userId, Long conversationId) {
+        requireOwned(userId, conversationId);
+    }
+
+    /**
      * 查出“属于这个用户的”会话。
      *
      * <p>别人的会话和不存在返回同一个 404，
