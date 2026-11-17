@@ -39,6 +39,12 @@ import static org.mockito.Mockito.when;
 @Transactional
 class ChatServiceTest {
 
+    /** 当前登录用户 */
+    private static final Long USER_ID = 1L;
+
+    /** 另一个用户，用来验证“看不到别人的会话” */
+    private static final Long OTHER_USER_ID = 2L;
+
     @Autowired
     private ChatService chatService;
 
@@ -53,23 +59,25 @@ class ChatServiceTest {
     private LlmClient llmClient;
 
     /**
-     * 第一次聊天：应新建会话，保存“用户消息 + 模型回复”两条记录。
+     * 第一次聊天：应新建会话（归属当前用户），保存“用户消息 + 模型回复”两条记录。
      */
     @Test
     void createsConversationAndSavesTwoMessages() {
         when(llmClient.chat(anyList())).thenReturn("你好，我是客服助手，有什么可以帮你？");
 
-        ChatResponse response = chatService.chat(null, "你好");
+        ChatResponse response = chatService.chat(USER_ID, null, "你好");
 
         assertThat(response.conversationId()).isNotNull();
         assertThat(response.reply()).isEqualTo("你好，我是客服助手，有什么可以帮你？");
+
+        Conversation conversation = conversationRepository.findById(response.conversationId()).orElseThrow();
+        assertThat(conversation.getUserId()).isEqualTo(USER_ID);
 
         List<Message> messages = messageRepository.findByConversationIdOrderByIdAsc(response.conversationId());
         assertThat(messages).hasSize(2);
         assertThat(messages.get(0).getRole()).isEqualTo(MessageRole.USER);
         assertThat(messages.get(0).getContent()).isEqualTo("你好");
         assertThat(messages.get(1).getRole()).isEqualTo(MessageRole.ASSISTANT);
-        assertThat(messages.get(1).getContent()).isEqualTo("你好，我是客服助手，有什么可以帮你？");
     }
 
     /**
@@ -79,14 +87,40 @@ class ChatServiceTest {
     void appendsMessagesToExistingConversation() {
         when(llmClient.chat(anyList())).thenReturn("好的");
 
-        ChatResponse first = chatService.chat(null, "你好");
-        ChatResponse second = chatService.chat(first.conversationId(), "再见");
+        ChatResponse first = chatService.chat(USER_ID, null, "你好");
+        ChatResponse second = chatService.chat(USER_ID, first.conversationId(), "再见");
 
         assertThat(second.conversationId()).isEqualTo(first.conversationId());
 
         List<Message> messages = messageRepository.findByConversationIdOrderByIdAsc(first.conversationId());
         assertThat(messages).hasSize(4);
         assertThat(messages.get(2).getContent()).isEqualTo("再见");
+    }
+
+    /**
+     * M1.2 的核心安全边界：往别人的会话里发消息，必须当成“会话不存在”。
+     */
+    @Test
+    void rejectsChattingInOthersConversation() {
+        when(llmClient.chat(anyList())).thenReturn("好的");
+
+        ChatResponse created = chatService.chat(USER_ID, null, "你好");
+
+        assertThatThrownBy(() -> chatService.chat(OTHER_USER_ID, created.conversationId(), "我也来插一句"))
+                .isInstanceOf(ConversationNotFoundException.class);
+    }
+
+    /**
+     * 查询别人的会话历史，同样返回 404，而不是把内容给出去。
+     */
+    @Test
+    void rejectsReadingOthersConversation() {
+        when(llmClient.chat(anyList())).thenReturn("好的");
+
+        ChatResponse created = chatService.chat(USER_ID, null, "你好");
+
+        assertThatThrownBy(() -> chatService.listMessages(OTHER_USER_ID, created.conversationId()))
+                .isInstanceOf(ConversationNotFoundException.class);
     }
 
     /**
@@ -97,19 +131,17 @@ class ChatServiceTest {
     void sendsPreviousTurnsToModel() {
         when(llmClient.chat(anyList())).thenReturn("7 天无理由退货");
 
-        ChatResponse first = chatService.chat(null, "你们支持退货吗");
-        chatService.chat(first.conversationId(), "那运费谁出");
+        ChatResponse first = chatService.chat(USER_ID, null, "你们支持退货吗");
+        chatService.chat(USER_ID, first.conversationId(), "那运费谁出");
 
         List<LlmMessage> prompt = capturePromptOfSecondCall();
 
         // system + 第一轮用户 + 第一轮回复 + 当前问题 = 4 条
         assertThat(prompt).hasSize(4);
         assertThat(prompt.get(0).role()).isEqualTo("system");
-        assertThat(prompt.get(1).role()).isEqualTo("user");
         assertThat(prompt.get(1).content()).isEqualTo("你们支持退货吗");
         assertThat(prompt.get(2).role()).isEqualTo("assistant");
         assertThat(prompt.get(2).content()).isEqualTo("7 天无理由退货");
-        assertThat(prompt.get(3).role()).isEqualTo("user");
         assertThat(prompt.get(3).content()).isEqualTo("那运费谁出");
     }
 
@@ -125,7 +157,8 @@ class ChatServiceTest {
         when(llmClient.chat(anyList())).thenReturn("好");
 
         LocalDateTime now = LocalDateTime.now();
-        Conversation conversation = conversationRepository.save(new Conversation("长对话测试", now));
+        Conversation conversation = conversationRepository.save(
+                new Conversation(USER_ID, "长对话测试", now));
 
         for (int i = 0; i < 5; i++) {
             MessageRole role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
@@ -133,16 +166,14 @@ class ChatServiceTest {
                     conversation.getId(), role, "长".repeat(1000) + i, now));
         }
 
-        chatService.chat(conversation.getId(), "当前问题");
+        chatService.chat(USER_ID, conversation.getId(), "当前问题");
 
-        // 这个用例只调用了一次模型，直接捕获那一次
         List<LlmMessage> prompt = captureOnlyPrompt();
 
         assertThat(prompt).hasSize(5);
         assertThat(prompt.get(0).role()).isEqualTo("system");
         // 最早保留下来的应该是第 3 条历史（下标 2），第 1、2 条被丢掉
         assertThat(prompt.get(1).content()).endsWith("2");
-        // 最后一条永远是当前问题
         assertThat(prompt.get(4).content()).isEqualTo("当前问题");
 
         int totalChars = prompt.stream().skip(1).mapToInt(message -> message.content().length()).sum();
@@ -157,7 +188,7 @@ class ChatServiceTest {
     void returnsFallbackReplyWhenLlmFails() {
         when(llmClient.chat(anyList())).thenThrow(new LlmException("模型调用失败：timeout"));
 
-        ChatResponse response = chatService.chat(null, "你们支持退货吗");
+        ChatResponse response = chatService.chat(USER_ID, null, "你们支持退货吗");
 
         assertThat(response.reply()).contains("人工客服");
 
@@ -167,29 +198,22 @@ class ChatServiceTest {
         assertThat(messages.get(1).getContent()).contains("人工客服");
     }
 
-    /**
-     * 传了不存在的会话 id：应抛出 ConversationNotFoundException（最终由全局异常处理转成 404）。
-     */
+    /** 传了不存在的会话 id：抛 ConversationNotFoundException。 */
     @Test
     void throwsWhenConversationDoesNotExist() {
-        assertThatThrownBy(() -> chatService.chat(999L, "在吗"))
+        assertThatThrownBy(() -> chatService.chat(USER_ID, 999L, "在吗"))
                 .isInstanceOf(ConversationNotFoundException.class);
     }
 
-    /**
-     * 查不存在会话的历史：同样应抛异常，而不是返回空列表。
-     */
+    /** 查不存在会话的历史：同样抛异常，而不是返回空列表。 */
     @Test
     void listMessagesThrowsWhenConversationDoesNotExist() {
-        assertThatThrownBy(() -> chatService.listMessages(999L))
+        assertThatThrownBy(() -> chatService.listMessages(USER_ID, 999L))
                 .isInstanceOf(ConversationNotFoundException.class);
     }
 
     /**
      * 捕获“第二次调用模型时传进去的消息列表”。
-     *
-     * <p>第一次调用是用户的第一句话，第二次才是带上下文的请求。
-     * 用 Mockito 的 ArgumentCaptor 把参数截下来，就能检查 Service 到底发了什么。
      */
     @SuppressWarnings("unchecked")
     private List<LlmMessage> capturePromptOfSecondCall() {

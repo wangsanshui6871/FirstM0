@@ -1,7 +1,7 @@
 # FirstM0 项目规划（AI 智能客服）
 
 > 这是项目的主计划。AI 助手先读 `AGENTS.md`，再读本文件。
-> 当前状态：**M1 进行中（M1.1 已完成），下一步 M1.2**。
+> 当前状态：**M1 进行中（M1.1、M1.2 已完成），下一步 M1.3**。
 > 最后更新：2026-11-17。
 
 ## 0. 这份文档怎么用
@@ -397,7 +397,7 @@ llm:
 | 小步 | 内容 | 状态 |
 |---|---|---|
 | M1.1 | 用户表 + 注册/登录 + JWT | 已完成 |
-| M1.2 | JWT 拦截器 + 会话归属用户 + 会话列表 | 待做 |
+| M1.2 | JWT 拦截器 + 会话归属用户 + 会话列表 | 已完成 |
 | M1.3 | SSE 流式输出 | 待做 |
 | M1.4 | Docker Compose | 待做 |
 
@@ -425,13 +425,27 @@ llm:
 - [x] 重复用户名 409、弱密码 400
 - [x] 能解释 JWT 结构、BCrypt 加盐、为什么登录失败不区分原因
 
-#### M1.2 会话隔离（待做）
+#### M1.2 会话隔离（已完成，2026-11-17）
 
-- 新增 `auth/AuthInterceptor`：解析 `Authorization: Bearer xxx`，把 userId 放进 request attribute
-- `WebConfig` 注册拦截器，排除 `/api/auth/**` 和静态资源
-- `conversation` 表加 `user_id`，`ChatService` 按当前用户查/建会话
-- 新增 `GET /api/conversations`（会话列表）、`PATCH /api/conversations/{id}`（重命名）、`DELETE /api/conversations/{id}`
-- 前端加会话侧边栏
+已完成内容：
+
+- `Conversation` 加 `user_id`（允许为空，兼容 M1.1 之前的无主记录）
+- `auth/AuthInterceptor` + `config/WebConfig`：`/api/**` 要登录，`/api/auth/**` 和 `/api/hello` 免登录
+- `ConversationRepository` 改成 `findByIdAndUserId`、`findByUserIdOrderByUpdatedAtDesc`
+- `ChatService` 所有方法带 `userId`，权限校验直接写进 where 条件
+- 新增 `service/ConversationService`：列表、重命名、删除（删除时先删消息）
+- 新增接口：`GET /api/conversations`、`PATCH /api/conversations/{id}`、`DELETE /api/conversations/{id}`
+- 前端改成左右布局：左侧会话栏（切换/改名/删除）、右侧聊天，底部退出登录
+- 测试：32 个全部通过（新增 chat 鉴权 1 个、会话管理 6 个、跨用户隔离 3 个）
+
+验收结果：
+
+- [x] `mvn test` 通过（32 个测试）
+- [x] 无 token 访问会话列表返回 401
+- [x] 用户 1 发消息创建会话 23，列表显示 1 条
+- [x] 用户 2 的列表是 0 条，读/删用户 1 的会话都返回 404
+- [x] 改名成功、删除后列表变 0
+- [x] 登录页跳转、退出登录、token 失效自动回登录页
 
 #### M1.3 SSE（待做）
 

@@ -13,7 +13,7 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 
 ## 2. 当前真实状态
 
-已完成（M0 骨架 + M0.1 ~ M0.5 + M1.1）：
+已完成（M0 骨架 + M0.1 ~ M0.5 + M1.1 + M1.2）：
 
 - Java 21
 - Spring Boot 3.5.16
@@ -29,13 +29,15 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 - 静态聊天页 `src/main/resources/static/index.html`（localStorage 记会话、刷新恢复历史、loading、错误提示、新对话）
 - 登录页 `src/main/resources/static/login.html`（登录/注册切换）
 - 认证：`domain/User`、`UserRole`、`repository/UserRepository`、`auth/JwtService`、`service/AuthService`、`controller/AuthController`
+- 鉴权：`auth/AuthInterceptor` + `config/WebConfig`，`/api/**` 需登录，`/api/auth/**` 与 `/api/hello` 除外
+- 会话归属：`conversation.user_id`，所有查询都带 userId，别人的会话一律 404
+- 会话管理：`service/ConversationService`，列表 / 重命名 / 删除
 - 密码用 BCrypt 加密存库，JWT 走 `jwt.*` 配置，密钥可用 `JWT_SECRET` 覆盖
-- 23 个测试：认证 5 个、上下文启动、hello、chat 3 个、历史 2 个、数据库与上下文 7 个、模型客户端 4 个
+- 32 个测试：认证 5 个、chat 4 个、会话管理 8 个、上下文启动 1 个、hello 1 个、数据库与上下文 9 个、模型客户端 4 个
 - README、`docs/PROJECT_PLAN.md`
 
 尚未完成：
 
-- 会话按用户隔离、会话列表（M1.2）
 - SSE 流式输出（M1.3）
 - Docker（M1.4）
 - RAG 知识库
@@ -129,19 +131,18 @@ mvn spring-boot:run
 
 ## 8. 任务进度
 
-**M1.1 已完成**（注册/登录/JWT，23 个测试）。
+**M1.2 已完成**（拦截器鉴权 + 会话归属 + 列表/重命名/删除 + 32 个测试）。
 
-**下一步任务：M1.2** —— 让会话归属到具体用户。
+**下一步任务：M1.3** —— SSE 流式输出。
 
-要求见 `docs/PROJECT_PLAN.md` 的「M1.2 会话隔离」一节。
+要求见 `docs/PROJECT_PLAN.md` 的「M1.3 SSE」一节。
 
-M1.2 范围提醒：
+M1.3 范围提醒：
 
-- 新增 `auth/AuthInterceptor` + `WebConfig`，排除 `/api/auth/**` 和静态资源
-- `conversation` 表加 `user_id`，老数据没有归属，开发环境可以直接清表
-- 会话列表、重命名、删除一起做
-- 前端加会话侧边栏
-- 不引入 Spring Security 全套过滤链
+- 教学顺序：先做假流式（服务端每 100ms 吐一个字）→ 再接真实模型流式 → 最后处理断线/取消
+- 用 Spring 的 `SseEmitter`，不引入 WebSocket
+- 前端用 `EventSource` 无法带 Authorization 头，需要用 fetch + ReadableStream 或把 token 放 query（后者不推荐）
+- 不引入 Redis、消息队列
 
 ## 9. 相关文档
 

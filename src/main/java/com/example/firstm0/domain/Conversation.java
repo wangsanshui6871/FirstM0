@@ -32,6 +32,16 @@ public class Conversation {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * 会话归属的用户 id。
+     *
+     * <p>允许为 null 只是为了让 M1.1 之前留下的老数据能继续存在；
+     * 从现在起新建的会话一定会带上 userId。
+     * 没有归属的会话不会出现在任何人的列表里，等于被隔离了。
+     */
+    @Column(name = "user_id")
+    private Long userId;
+
     /** 会话标题，先用用户第一句话截断生成，最长 100 字符。 */
     @Column(nullable = false, length = 100)
     private String title;
@@ -54,10 +64,12 @@ public class Conversation {
     /**
      * 业务使用的构造器：新建会话时调用。
      *
-     * @param title 会话标题
-     * @param now   当前时间，由 Service 传入，方便测试时控制时间
+     * @param userId 归属用户
+     * @param title  会话标题
+     * @param now    当前时间，由 Service 传入，方便测试时控制时间
      */
-    public Conversation(String title, LocalDateTime now) {
+    public Conversation(Long userId, String title, LocalDateTime now) {
+        this.userId = userId;
         this.title = title;
         this.createdAt = now;
         this.updatedAt = now;
@@ -68,8 +80,17 @@ public class Conversation {
         this.updatedAt = now;
     }
 
+    /** 重命名。长度限制由 Service 校验，实体这里只负责赋值。 */
+    public void rename(String newTitle) {
+        this.title = newTitle;
+    }
+
     public Long getId() {
         return id;
+    }
+
+    public Long getUserId() {
+        return userId;
     }
 
     public String getTitle() {

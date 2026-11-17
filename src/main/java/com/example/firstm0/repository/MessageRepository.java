@@ -39,4 +39,14 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      * @return 最多 10 条消息，最新的排在最前面
      */
     List<Message> findTop10ByConversationIdOrderByIdDesc(Long conversationId);
+
+    /**
+     * 删除某个会话下的全部消息。
+     *
+     * <p>派生删除：Spring Data 会先查出符合条件的记录再逐条删。
+     * 会话消息量小，足够用；数据量大时再换成一条 delete 语句。
+     *
+     * @param conversationId 会话 id
+     */
+    void deleteByConversationId(Long conversationId);
 }

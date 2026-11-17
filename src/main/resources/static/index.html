@@ -1,14 +1,14 @@
 <!doctype html>
 <!--
-  FirstM0 聊天页 —— M0.5 版本。
-  职责：把「页面 → POST /api/chat → 模型 → 数据库」这条链路做成真正能用的聊天界面。
-  已支持：会话 id 存 localStorage、刷新恢复历史、loading 状态、错误提示、新对话按钮。
+  FirstM0 聊天页 —— M1.2 版本。
+  职责：登录后聊天，左侧会话列表可切换/重命名/删除，右侧聊天。
+  依赖接口：/api/auth/login、/api/conversations、/api/chat
 -->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FirstM0 · AI 客服骨架</title>
+  <title>FirstM0 · AI 客服</title>
   <style>
     /* 主题配色变量：只改这里就能整体换肤，下面所有颜色都引用这些变量 */
     :root {
@@ -18,6 +18,8 @@
       --accent: #38bdf8;
       --user: #1d4ed8;
       --bot: #1e293b;
+      --line: rgba(148, 163, 184, 0.14);
+      --danger: #f87171;
     }
 
     * { box-sizing: border-box; }
@@ -37,10 +39,9 @@
     }
 
     .app {
-      width: min(760px, 100%);
+      width: min(1040px, 100%);
       min-height: calc(100vh - 48px);
       display: flex;
-      flex-direction: column;
       overflow: hidden;
       background: rgba(15, 23, 42, 0.78);
       border: 1px solid rgba(148, 163, 184, 0.18);
@@ -49,109 +50,161 @@
       backdrop-filter: blur(16px);
     }
 
+    /* ---------------- 左侧会话栏 ---------------- */
+
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: rgba(2, 6, 23, 0.28);
+    }
+
+    .sidebar-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+
+    .conv-list {
+      flex: 1;
+      margin: 0;
+      padding: 8px;
+      list-style: none;
+      overflow-y: auto;
+    }
+
+    .conv-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 12px;
+      margin-bottom: 4px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .conv-item:hover { background: rgba(148, 163, 184, 0.1); }
+
+    .conv-item.active {
+      background: rgba(56, 189, 248, 0.14);
+      border-color: rgba(56, 189, 248, 0.35);
+    }
+
+    .conv-main { flex: 1; min-width: 0; }
+
+    .conv-title {
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .conv-time {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    /* 小图标按钮：改名 / 删除 */
+    .icon-button {
+      padding: 2px 6px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+      opacity: 0;
+    }
+
+    .conv-item:hover .icon-button { opacity: 1; }
+
+    .icon-button:hover { color: var(--accent); background: rgba(148, 163, 184, 0.14); }
+
+    .icon-button.danger:hover { color: var(--danger); }
+
+    .empty-tip {
+      padding: 16px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .sidebar-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .username {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .link-button {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .link-button:hover { color: var(--danger); }
+
+    /* ---------------- 右侧聊天区 ---------------- */
+
+    .chat {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
     header {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 20px 24px;
-      border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--line);
     }
 
     h1 {
       margin: 0;
-      font-size: 20px;
+      font-size: 18px;
       letter-spacing: 0.2px;
     }
 
     h1 span {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
     }
 
     header p {
-      margin: 6px 0 0;
+      margin: 5px 0 0;
       color: var(--muted);
       font-size: 12px;
-    }
-
-    .badge {
-      padding: 5px 10px;
-      border: 1px solid rgba(56, 189, 248, 0.5);
-      border-radius: 999px;
-      color: var(--accent);
-      font-size: 12px;
-      white-space: nowrap;
-    }
-
-    /* 右上角：徽标 + 新对话按钮 */
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    /* 未登录时是“登录”链接，登录后变成用户名 */
-    .user-link {
-      padding: 5px 10px;
-      border: 1px solid transparent;
-      border-radius: 999px;
-      color: var(--muted);
-      font-size: 12px;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-
-    .user-link:hover {
-      border-color: rgba(56, 189, 248, 0.4);
-      color: var(--accent);
-    }
-
-    .user-link.logged-in {
-      color: var(--text);
-      cursor: default;
-    }
-
-    .user-link.logged-in:hover {
-      border-color: transparent;
-      color: var(--text);
-    }
-
-    /* 次要按钮：透明背景，只在边框上做文章，和主按钮区分开 */
-    button.secondary {
-      padding: 6px 12px;
-      border: 1px solid rgba(148, 163, 184, 0.35);
-      border-radius: 999px;
-      background: transparent;
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 500;
-    }
-
-    button.secondary:hover {
-      border-color: var(--accent);
-      color: var(--accent);
-      filter: none;
-    }
-
-    /* 请求进行中的“正在输入”气泡，比普通气泡淡一些 */
-    .bubble.typing {
-      align-self: flex-start;
-      background: var(--bot);
-      border-bottom-left-radius: 4px;
-      color: var(--muted);
-      font-style: italic;
-    }
-
-    /* 输入中禁止重复提交 */
-    button:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-
-    input:disabled {
-      opacity: 0.65;
     }
 
     main {
@@ -184,11 +237,19 @@
       border-bottom-right-radius: 4px;
     }
 
+    .bubble.typing {
+      align-self: flex-start;
+      background: var(--bot);
+      border-bottom-left-radius: 4px;
+      color: var(--muted);
+      font-style: italic;
+    }
+
     form {
       display: flex;
       gap: 10px;
       padding: 16px;
-      border-top: 1px solid rgba(148, 163, 184, 0.14);
+      border-top: 1px solid var(--line);
       background: rgba(2, 6, 23, 0.28);
     }
 
@@ -219,118 +280,362 @@
 
     button:hover { filter: brightness(1.08); }
 
-    .hint {
-      margin: 0;
-      padding: 0 24px 16px;
-      color: var(--muted);
-      font-size: 12px;
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
     }
 
-    code {
-      padding: 2px 5px;
-      border-radius: 5px;
-      background: rgba(148, 163, 184, 0.14);
-      color: #bae6fd;
-      font-family: Consolas, monospace;
+    input:disabled { opacity: 0.65; }
+
+    .primary-small {
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* ---------------- 窄屏：会话栏移到顶部 ---------------- */
+
+    @media (max-width: 720px) {
+      body { padding: 12px; }
+
+      .app {
+        flex-direction: column;
+        min-height: calc(100vh - 24px);
+      }
+
+      .sidebar {
+        width: 100%;
+        max-height: 200px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .icon-button { opacity: 1; }
     }
   </style>
 </head>
 <body>
   <div class="app">
-    <header>
-      <div>
-        <h1>FirstM0 <span>AI 客服骨架</span></h1>
-        <p>Spring Boot 3.5 · Java 21 · Maven</p>
+    <!-- 左侧：会话列表 + 当前用户 -->
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span class="brand">FirstM0</span>
+        <button type="button" class="primary-small" id="new-chat">+ 新对话</button>
       </div>
-      <div class="header-actions">
-        <a class="user-link" id="user-link" href="/login.html">登录</a>
-        <span class="badge" id="session-label">新会话</span>
-        <button type="button" class="secondary" id="new-chat">新对话</button>
+
+      <ul class="conv-list" id="conversation-list"></ul>
+
+      <div class="sidebar-foot">
+        <span class="username" id="username">未登录</span>
+        <button type="button" class="link-button" id="logout">退出</button>
       </div>
-    </header>
+    </aside>
 
-    <main id="messages">
-      <!-- 消息区：JS 会把用户/机器人气泡动态插入到这里 -->
-      <div class="bubble bot">你好，我是 FirstM0 客服助手。发送消息会调用 <code>POST /api/chat</code>，由大模型生成回复，并保存到 MySQL。</div>
-    </main>
+    <!-- 右侧：聊天区 -->
+    <section class="chat">
+      <header>
+        <div>
+          <h1>FirstM0 <span>AI 客服</span></h1>
+          <p id="session-label">新会话</p>
+        </div>
+      </header>
 
-    <form id="chat-form">
-      <input id="message" autocomplete="off" placeholder="输入一句话，和客服助手聊聊…">
-      <button type="submit" id="send-button">发送</button>
-    </form>
+      <main id="messages">
+        <div class="bubble bot">你好，我是 FirstM0 客服助手。左侧可以切换历史会话，也可以开始新的对话。</div>
+      </main>
 
-    <p class="hint">会话 id 存在浏览器 localStorage 里，刷新页面会自动恢复最近 10 轮记录。</p>
+      <form id="chat-form">
+        <input id="message" autocomplete="off" placeholder="输入一句话，和客服助手聊聊…">
+        <button type="submit" id="send-button">发送</button>
+      </form>
+    </section>
   </div>
 
   <script>
     // ------------------------------------------------------------------
-    // 1. 页面元素与状态
+    // 1. 常量与元素
     // ------------------------------------------------------------------
+    const TOKEN_KEY = 'firstm0.token';
+    const USERNAME_KEY = 'firstm0.username';
+    const CONVERSATION_KEY = 'firstm0.conversationId';
+
     const form = document.getElementById('chat-form');
     const input = document.getElementById('message');
     const messages = document.getElementById('messages');
     const sendButton = document.getElementById('send-button');
     const newChatButton = document.getElementById('new-chat');
+    const logoutButton = document.getElementById('logout');
+    const usernameLabel = document.getElementById('username');
     const sessionLabel = document.getElementById('session-label');
-    const userLink = document.getElementById('user-link');
+    const conversationList = document.getElementById('conversation-list');
 
-    // 右上角显示登录状态：有用户名就显示名字，没有就保留“登录”链接
-    const storedUsername = localStorage.getItem('firstm0.username');
-    if (storedUsername) {
-      userLink.textContent = storedUsername;
-      userLink.removeAttribute('href');
-      userLink.classList.add('logged-in');
-      userLink.title = '已登录（M1.2 会做退出登录）';
-    }
-
-    // localStorage 的 key：换名字等于换一份会话记录
-    const STORAGE_KEY = 'firstm0.conversationId';
-
-    // 当前会话 id：优先从 localStorage 恢复，没有就是 null（后端会新建）
+    // 当前会话 id：null 表示还没创建（下一条消息会新建）
     let conversationId = readStoredConversationId();
 
-    // 页面打开时，如果之前有会话，就把历史消息拉回来
-    restoreHistory();
+    // ------------------------------------------------------------------
+    // 2. 启动检查：没登录直接去登录页
+    // ------------------------------------------------------------------
+    if (!localStorage.getItem(TOKEN_KEY)) {
+      location.replace('/login.html');
+    } else {
+      usernameLabel.textContent = localStorage.getItem(USERNAME_KEY) || '已登录';
+      start();
+    }
+
+    async function start() {
+      updateSessionLabel();
+      await loadConversations();
+      if (conversationId !== null) {
+        await loadHistory(conversationId);
+      }
+    }
 
     // ------------------------------------------------------------------
-    // 2. 发送消息
+    // 3. 统一的请求封装：自动带 token，401 统一回登录页
+    // ------------------------------------------------------------------
+    async function apiFetch(url, options = {}) {
+      const token = localStorage.getItem(TOKEN_KEY);
+      const headers = Object.assign({}, options.headers);
+
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const response = await fetch(url, Object.assign({}, options, { headers }));
+
+      if (response.status === 401) {
+        clearLoginState();
+        location.replace('/login.html');
+        throw new Error('登录已过期');
+      }
+
+      return response;
+    }
+
+    // ------------------------------------------------------------------
+    // 4. 会话列表
+    // ------------------------------------------------------------------
+    async function loadConversations() {
+      try {
+        const response = await apiFetch('/api/conversations');
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+
+        const list = await response.json();
+        renderConversations(list);
+      } catch (error) {
+        if (!error.message.includes('登录已过期')) {
+          conversationList.innerHTML = '<li class="empty-tip">会话列表加载失败：' + error.message + '</li>';
+        }
+      }
+    }
+
+    function renderConversations(list) {
+      conversationList.innerHTML = '';
+
+      if (list.length === 0) {
+        conversationList.innerHTML = '<li class="empty-tip">还没有会话。<br>在右侧发一句话就会自动创建。</li>';
+        return;
+      }
+
+      list.forEach((item) => {
+        const li = document.createElement('li');
+        li.className = 'conv-item' + (item.id === conversationId ? ' active' : '');
+        li.dataset.id = item.id;
+
+        const main = document.createElement('div');
+        main.className = 'conv-main';
+
+        const title = document.createElement('div');
+        title.className = 'conv-title';
+        title.textContent = item.title;
+
+        const time = document.createElement('div');
+        time.className = 'conv-time';
+        time.textContent = formatTime(item.updatedAt);
+
+        main.appendChild(title);
+        main.appendChild(time);
+
+        const renameButton = document.createElement('button');
+        renameButton.type = 'button';
+        renameButton.className = 'icon-button';
+        renameButton.textContent = '改名';
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'icon-button danger';
+        deleteButton.textContent = '删除';
+
+        li.appendChild(main);
+        li.appendChild(renameButton);
+        li.appendChild(deleteButton);
+
+        // 点整行切换会话；点按钮时阻止冒泡，避免误触发切换
+        li.addEventListener('click', () => selectConversation(item.id));
+        renameButton.addEventListener('click', (event) => {
+          event.stopPropagation();
+          renameConversation(item);
+        });
+        deleteButton.addEventListener('click', (event) => {
+          event.stopPropagation();
+          removeConversation(item);
+        });
+
+        conversationList.appendChild(li);
+      });
+    }
+
+    // ------------------------------------------------------------------
+    // 5. 切换 / 新建 / 改名 / 删除
+    // ------------------------------------------------------------------
+    async function selectConversation(id) {
+      if (id === conversationId) return;
+
+      conversationId = id;
+      localStorage.setItem(CONVERSATION_KEY, String(id));
+      updateSessionLabel();
+      highlightActive();
+      await loadHistory(id);
+    }
+
+    async function loadHistory(id) {
+      try {
+        const response = await apiFetch('/api/conversations/' + id + '/messages');
+
+        // 会话可能已被删除：清掉本地记录，回到新会话状态
+        if (response.status === 404) {
+          resetToNewConversation('这个会话已经不存在了，已切换到新对话。');
+          await loadConversations();
+          return;
+        }
+
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+
+        const history = await response.json();
+        messages.innerHTML = '';
+
+        if (history.length === 0) {
+          addBubble('这个会话还没有消息。', 'bot');
+          return;
+        }
+
+        history.forEach((item) => {
+          addBubble(item.content, item.role === 'USER' ? 'user' : 'bot');
+        });
+      } catch (error) {
+        if (!error.message.includes('登录已过期')) {
+          addBubble('历史记录加载失败：' + error.message, 'bot');
+        }
+      }
+    }
+
+    newChatButton.addEventListener('click', () => {
+      resetToNewConversation('已开始新对话。发送第一条消息后会创建新的会话。');
+    });
+
+    async function renameConversation(item) {
+      const nextTitle = prompt('输入新的会话标题（最多 100 字）', item.title);
+      if (nextTitle === null) return;
+
+      const trimmed = nextTitle.trim();
+      if (!trimmed) {
+        alert('标题不能为空');
+        return;
+      }
+
+      try {
+        const response = await apiFetch('/api/conversations/' + item.id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: trimmed })
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => null);
+          throw new Error(errorBody?.message || 'HTTP ' + response.status);
+        }
+
+        await loadConversations();
+      } catch (error) {
+        if (!error.message.includes('登录已过期')) alert('改名失败：' + error.message);
+      }
+    }
+
+    async function removeConversation(item) {
+      if (!confirm('确定删除「' + item.title + '」吗？消息会一起删除，无法恢复。')) return;
+
+      try {
+        const response = await apiFetch('/api/conversations/' + item.id, { method: 'DELETE' });
+
+        if (!response.ok && response.status !== 404) {
+          const errorBody = await response.json().catch(() => null);
+          throw new Error(errorBody?.message || 'HTTP ' + response.status);
+        }
+
+        // 删掉的正好是当前会话，就回到新会话
+        if (item.id === conversationId) {
+          resetToNewConversation('当前会话已删除，已切换到新对话。');
+        }
+
+        await loadConversations();
+      } catch (error) {
+        if (!error.message.includes('登录已过期')) alert('删除失败：' + error.message);
+      }
+    }
+
+    function resetToNewConversation(tip) {
+      conversationId = null;
+      localStorage.removeItem(CONVERSATION_KEY);
+      updateSessionLabel();
+      highlightActive();
+
+      messages.innerHTML = '';
+      addBubble(tip, 'bot');
+      input.focus();
+    }
+
+    // ------------------------------------------------------------------
+    // 6. 发送消息
     // ------------------------------------------------------------------
     form.addEventListener('submit', async (event) => {
-      event.preventDefault();            // 阻止浏览器默认的“整页刷新”提交行为
-      const text = input.value.trim();   // 去掉首尾空格
-      if (!text) return;                 // 空内容不发请求
+      event.preventDefault();
 
-      addBubble(text, 'user');           // 先把用户的话画成气泡（乐观显示，不用等后端）
-      input.value = '';                  // 清空输入框
+      const text = input.value.trim();
+      if (!text) return;
 
-      // 进入 loading 状态：禁止重复提交，并显示“正在输入”
+      addBubble(text, 'user');
+      input.value = '';
+
       setBusy(true);
       const typingBubble = addBubble('正在输入…', 'typing');
 
       try {
-        const response = await fetch('/api/chat', {
+        const response = await apiFetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // 带上会话 id：第一次是 null，之后一直复用同一个 id
           body: JSON.stringify({ conversationId: conversationId, message: text })
         });
 
-        // 非 2xx：后端会返回统一的 { code, message }，优先把 message 展示给用户
         if (!response.ok) {
           const errorBody = await response.json().catch(() => null);
           throw new Error(errorBody?.message || 'HTTP ' + response.status);
         }
 
         const data = await response.json();
-        conversationId = data.conversationId;   // 记住会话 id，下一句接着聊
-        storeConversationId(conversationId);    // 存进 localStorage，刷新也不丢
+
+        conversationId = data.conversationId;
+        localStorage.setItem(CONVERSATION_KEY, String(conversationId));
         updateSessionLabel();
 
-        typingBubble.remove();                  // 收到回复，移除“正在输入”气泡
+        typingBubble.remove();
         addBubble(data.reply, 'bot');
+
+        // 会话的更新时间变了，列表顺序会变；新建会话时也要让它出现在列表里
+        await loadConversations();
       } catch (error) {
         typingBubble.remove();
-        addBubble('请求失败：' + error.message + '\n（检查后端是否启动，然后重试）', 'bot');
+        if (!error.message.includes('登录已过期')) {
+          addBubble('请求失败：' + error.message + '\n（检查后端是否启动，然后重试）', 'bot');
+        }
       } finally {
         setBusy(false);
         input.focus();
@@ -338,60 +643,18 @@
     });
 
     // ------------------------------------------------------------------
-    // 3. 新对话
+    // 7. 退出登录
     // ------------------------------------------------------------------
-    newChatButton.addEventListener('click', () => {
-      conversationId = null;
-      localStorage.removeItem(STORAGE_KEY);   // 清掉记住的 id，下次会新建会话
+    logoutButton.addEventListener('click', () => {
+      if (!confirm('确定退出登录吗？')) return;
 
-      // 清空消息区，只留一句欢迎语
-      messages.innerHTML = '';
-      addBubble('已开始新对话，之前的记录还在数据库里，只是这个页面不再接着聊。', 'bot');
-      updateSessionLabel();
-      input.focus();
+      clearLoginState();
+      location.replace('/login.html');
     });
 
     // ------------------------------------------------------------------
-    // 4. 刷新恢复：按 conversationId 拉历史消息
+    // 8. 小工具
     // ------------------------------------------------------------------
-    async function restoreHistory() {
-      if (conversationId === null) {
-        updateSessionLabel();
-        return;
-      }
-
-      try {
-        const response = await fetch('/api/conversations/' + conversationId + '/messages');
-
-        // 404 说明这个会话在数据库里已经不存在了，清掉本地记录，当新会话处理
-        if (response.status === 404) {
-          conversationId = null;
-          localStorage.removeItem(STORAGE_KEY);
-          updateSessionLabel();
-          return;
-        }
-
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-
-        const history = await response.json();
-        if (history.length === 0) return;
-
-        messages.innerHTML = '';   // 去掉欢迎语，换成真实历史
-        history.forEach((item) => {
-          addBubble(item.content, item.role === 'USER' ? 'user' : 'bot');
-        });
-      } catch (error) {
-        // 恢复失败不影响继续聊天，只在控制台留个记录
-        console.warn('恢复历史失败：', error.message);
-        updateSessionLabel();
-      }
-    }
-
-    // ------------------------------------------------------------------
-    // 5. 小工具函数
-    // ------------------------------------------------------------------
-
-    // 往消息区追加一个气泡，并返回这个元素（方便之后删除“正在输入”）
     function addBubble(text, role) {
       const div = document.createElement('div');
       div.className = 'bubble ' + role;
@@ -401,30 +664,40 @@
       return div;
     }
 
-    // 切换“发送中”状态
     function setBusy(busy) {
       sendButton.disabled = busy;
       input.disabled = busy;
       sendButton.textContent = busy ? '发送中…' : '发送';
     }
 
-    // 右上角显示当前会话编号
     function updateSessionLabel() {
       sessionLabel.textContent = conversationId === null ? '新会话' : '会话 #' + conversationId;
     }
 
-    // 读取 localStorage 里存的会话 id；没有或格式不对就返回 null
+    function highlightActive() {
+      document.querySelectorAll('.conv-item').forEach((li) => {
+        li.classList.toggle('active', Number(li.dataset.id) === conversationId);
+      });
+    }
+
+    function formatTime(iso) {
+      const date = new Date(iso);
+      const pad = (value) => String(value).padStart(2, '0');
+
+      return pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+          + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+
     function readStoredConversationId() {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = Number(raw);
+      const parsed = Number(localStorage.getItem(CONVERSATION_KEY));
 
       return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
     }
 
-    function storeConversationId(id) {
-      if (id !== null && id !== undefined) {
-        localStorage.setItem(STORAGE_KEY, String(id));
-      }
+    function clearLoginState() {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USERNAME_KEY);
+      localStorage.removeItem(CONVERSATION_KEY);
     }
   </script>
 </body>

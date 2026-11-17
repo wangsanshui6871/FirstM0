@@ -93,14 +93,15 @@ public class ChatService {
     /**
      * 处理一次用户发消息。
      *
+     * @param userId         当前登录用户，M1.2 起会话必须归属到人
      * @param conversationId 会话 id，第一次聊天传 null
      * @param userMessage    用户消息（已由 Controller 校验）
      * @return 会话 id + 机器人回复
      */
-    public ChatResponse chat(Long conversationId, String userMessage) {
+    public ChatResponse chat(Long userId, Long conversationId, String userMessage) {
         // 第 1 段：事务内，建会话 + 存用户消息，提交后立刻释放连接
         Long savedConversationId = Objects.requireNonNull(
-                transactionTemplate.execute(status -> saveUserTurn(conversationId, userMessage)));
+                transactionTemplate.execute(status -> saveUserTurn(userId, conversationId, userMessage)));
 
         // 第 2 段：事务外，组装上下文并等模型返回；可能很慢，但不占用数据库连接
         String reply = generateReply(buildPrompt(savedConversationId));
@@ -114,15 +115,15 @@ public class ChatService {
     /**
      * 查询某个会话的全部历史消息，按时间从早到晚排列。
      *
+     * @param userId         当前登录用户
      * @param conversationId 会话 id
      * @return 消息列表（没有消息时是空列表）
-     * @throws ConversationNotFoundException 会话不存在时抛出，最终变成 404
+     * @throws ConversationNotFoundException 会话不存在，或不属于当前用户
      */
-    public List<MessageResponse> listMessages(Long conversationId) {
-        // 先确认会话存在，否则返回空列表会让人误以为“会话存在只是没消息”
-        if (!conversationRepository.existsById(conversationId)) {
-            throw new ConversationNotFoundException(conversationId);
-        }
+    public List<MessageResponse> listMessages(Long userId, Long conversationId) {
+        // 用“id + userId”一起查：别人的会话查不到，返回 404
+        conversationRepository.findByIdAndUserId(conversationId, userId)
+                .orElseThrow(() -> new ConversationNotFoundException(conversationId));
 
         return messageRepository.findByConversationIdOrderByIdAsc(conversationId).stream()
                 .map(MessageResponse::from)
@@ -130,12 +131,12 @@ public class ChatService {
     }
 
     /** 第一段事务：查/建会话，并存下用户这条消息。 */
-    private Long saveUserTurn(Long conversationId, String userMessage) {
+    private Long saveUserTurn(Long userId, Long conversationId, String userMessage) {
         LocalDateTime now = LocalDateTime.now();
 
         Conversation conversation = (conversationId == null)
-                ? conversationRepository.save(new Conversation(titleFrom(userMessage), now))
-                : conversationRepository.findById(conversationId)
+                ? conversationRepository.save(new Conversation(userId, titleFrom(userMessage), now))
+                : conversationRepository.findByIdAndUserId(conversationId, userId)
                         .orElseThrow(() -> new ConversationNotFoundException(conversationId));
 
         messageRepository.save(new Message(conversation.getId(), MessageRole.USER, userMessage, now));

@@ -1,19 +1,18 @@
 # FirstM0
 
-M1.1：支持注册和登录（JWT）。登录状态存在浏览器里，右上角显示用户名。
+M1.2：会话归属到用户。登录后才能聊天，每个人只看得到自己的会话，可以切换、重命名、删除。
 
 当前版本刻意保持很小：
 
 - 一个 Spring Boot 启动类
-- 一个 `GET /api/hello`（骨架验证用）
 - `POST /api/auth/register`、`POST /api/auth/login`（BCrypt 加密密码 + 签发 JWT）
-- 一个 `POST /api/chat`（参数校验 + 落库 + 多轮上下文 + 真实模型回复 + 失败降级）
-- 一个 `GET /api/conversations/{id}/messages`（查历史消息）
-- 聊天页（localStorage 记会话、刷新恢复、loading、错误提示、新对话）
+- 一个 `POST /api/chat`（登录校验 + 参数校验 + 落库 + 多轮上下文 + 真实模型回复 + 失败降级）
+- 会话管理：列表、查历史、重命名、删除，全部只能操作自己的
+- 聊天页（左侧会话栏、localStorage 记会话、loading、错误提示、退出登录）
 - 登录页（登录/注册切换）
-- 23 个测试（认证 5 个、上下文启动、hello、chat 3 个、历史 2 个、数据库与上下文 7 个、模型客户端 4 个）
+- 32 个测试（认证 5 个、chat 4 个、会话管理 8 个、上下文启动 1 个、hello 1 个、数据库与上下文 9 个、模型客户端 4 个）
 
-**现在还没有**：会话按用户隔离、会话列表、SSE 流式输出、RAG 知识库。这些在 M1.2 / M1.3 / M2 里加。
+**现在还没有**：SSE 流式输出、Docker、RAG 知识库。这些在 M1.3 / M1.4 / M2 里加。
 
 ## AI 接手入口
 
@@ -121,7 +120,7 @@ Content-Type: application/json
 - 密码用 BCrypt 加密后入库，数据库里只有 `$2a$10$...` 这样的哈希，没有明文
 - 用户名重复返回 `409`，密码错误返回 `401`
 - `token` 有效期 7 天，前端存在 `localStorage` 的 `firstm0.token`
-- 聊天接口目前还不校验 token（M1.2 会加拦截器做会话隔离）
+- 除了 `/api/auth/**` 和 `/api/hello`，所有 `/api/**` 都要带 `Authorization: Bearer <token>`，否则返回 `401`
 
 ### 1. 骨架验证
 
@@ -193,10 +192,35 @@ Content-Type: application/json
 }
 ```
 
-### 3. 查历史消息（M0.2）
+### 3. 会话管理（M1.2）
+
+以下接口都要带 `Authorization: Bearer <token>`，且只能操作自己的会话。
 
 ```http
-GET /api/conversations/4/messages
+GET    /api/conversations                   # 我的会话列表，最近更新的在前
+GET    /api/conversations/{id}/messages     # 某个会话的历史消息
+PATCH  /api/conversations/{id}              # 重命名，body: {"title": "退换货咨询"}
+DELETE /api/conversations/{id}              # 删除会话及其消息
+```
+
+列表返回：
+
+```json
+[
+  { "id": 23, "title": "退换货咨询", "createdAt": "2026-11-17T17:05:00", "updatedAt": "2026-11-17T17:06:12" }
+]
+```
+
+约定：
+
+- 重命名和删除成功返回 `204`，没有响应体
+- 会话不存在、或不属于当前用户，一律返回 `404`——不告诉对方这个 id 到底存在不存在
+- 没有 token 或 token 失效返回 `401`
+
+### 4. 查历史消息（M0.2 起）
+
+```http
+GET /api/conversations/{id}/messages
 ```
 
 返回按时间从早到晚排列的消息数组：
@@ -228,9 +252,12 @@ src/main/java/com/example/firstm0/
 │   └── ConversationController.java  # /api/conversations/{id}/messages
 ├── service/
 │   ├── ChatService.java         # 三段式：存消息 → 事务外调模型 → 存回复
+│   ├── ConversationService.java # 会话列表、重命名、删除（都带 userId）
 │   └── AuthService.java         # 注册（BCrypt 加密）、登录（校验密码 + 签发 JWT）
 ├── auth/
 │   ├── JwtService.java          # 签发和校验 JWT
+│   ├── AuthInterceptor.java     # 校验 Authorization 头，把 userId 放进 request
+│   ├── AuthAttributes.java      # request attribute 名字常量
 │   └── TokenInvalidException.java  # token 无效 -> 401
 ├── llm/
 │   ├── LlmClient.java           # 模型调用接口（Service 只依赖它）
@@ -239,7 +266,8 @@ src/main/java/com/example/firstm0/
 │   └── OpenAiCompatibleClient.java  # 用 RestClient 调 OpenAI 兼容接口
 ├── config/
 │   ├── LlmProperties.java       # 读取 llm.* 配置
-│   └── JwtProperties.java       # 读取 jwt.* 配置
+│   ├── JwtProperties.java       # 读取 jwt.* 配置
+│   └── WebConfig.java           # 注册登录拦截器，声明哪些路径免登录
 ├── domain/
 │   ├── Conversation.java        # 会话实体 -> conversation 表
 │   ├── Message.java             # 消息实体 -> message 表
@@ -282,18 +310,18 @@ src/test/java/com/example/firstm0/
 
 ## 建议先弄懂这 6 个点
 
-1. JWT 的三段结构分别是什么？为什么 payload 不是加密的，却还能防篡改？
-2. BCrypt 为什么每次加密同一个密码结果都不一样？怎么验证密码对不对？
-3. 登录失败为什么统一提示“用户名或密码错误”，而不是区分两种情况？
-4. `@Valid` 为什么只校验注册请求、不校验登录请求的密码长度？
-5. `localStorage` 存 token 有什么风险？换成 Cookie 会怎样？
-6. 为什么这轮不引入 Spring Security 全套？它默认会做什么？
+1. 拦截器（`HandlerInterceptor`）和过滤器（`Filter`）有什么区别？各自适合做什么？
+2. 为什么查会话要用 `findByIdAndUserId`，而不是先 `findById` 再比较 `userId`？
+3. 别人的会话为什么返回 404 而不是 403？这两种状态码分别暴露了什么信息？
+4. JWT 是无状态的，那“主动让某个 token 失效”要怎么做？
+5. 删除会话时为什么先删消息再删会话？没有外键约束会留下什么？
+6. 前端怎么统一处理 401？为什么要在封装里做，而不是每个请求各写一遍？
 
 ## 下一步（按顺序）
 
 - **M0.1 ~ M0.5** —— ✅ 已完成
 - **M1.1**：注册 / 登录 / JWT —— ✅ 已完成
-- **M1.2**：加 JWT 拦截器，会话归属当前用户（列表、重命名、删除）
+- **M1.2**：会话隔离 + 会话列表/重命名/删除 —— ✅ 已完成
 - **M1.3**：SSE 流式输出
 - **M1.4**：Docker Compose
 - **M2**：知识库 RAG、引用、拒答、转人工
