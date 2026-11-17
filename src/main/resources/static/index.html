@@ -1,8 +1,8 @@
 <!doctype html>
 <!--
-  FirstM0 聊天页 —— M0.1 版本。
-  职责：验证「前端 → POST /api/chat → 前端」这条链路是否打通。
-  后端现在返回固定回复；M0.5 会把这页做成真正可用的聊天页（loading、错误提示、新对话）。
+  FirstM0 聊天页 —— M0.5 版本。
+  职责：把「页面 → POST /api/chat → 模型 → 数据库」这条链路做成真正能用的聊天界面。
+  已支持：会话 id 存 localStorage、刷新恢复历史、loading 状态、错误提示、新对话按钮。
 -->
 <html lang="zh-CN">
 <head>
@@ -83,6 +83,49 @@
       color: var(--accent);
       font-size: 12px;
       white-space: nowrap;
+    }
+
+    /* 右上角：徽标 + 新对话按钮 */
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* 次要按钮：透明背景，只在边框上做文章，和主按钮区分开 */
+    button.secondary {
+      padding: 6px 12px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    button.secondary:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      filter: none;
+    }
+
+    /* 请求进行中的“正在输入”气泡，比普通气泡淡一些 */
+    .bubble.typing {
+      align-self: flex-start;
+      background: var(--bot);
+      border-bottom-left-radius: 4px;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    /* 输入中禁止重复提交 */
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    input:disabled {
+      opacity: 0.65;
     }
 
     main {
@@ -173,7 +216,10 @@
         <h1>FirstM0 <span>AI 客服骨架</span></h1>
         <p>Spring Boot 3.5 · Java 21 · Maven</p>
       </div>
-      <span class="badge">M0.3</span>
+      <div class="header-actions">
+        <span class="badge" id="session-label">新会话</span>
+        <button type="button" class="secondary" id="new-chat">新对话</button>
+      </div>
     </header>
 
     <main id="messages">
@@ -183,23 +229,35 @@
 
     <form id="chat-form">
       <input id="message" autocomplete="off" placeholder="输入一句话，和客服助手聊聊…">
-      <button type="submit">发送</button>
+      <button type="submit" id="send-button">发送</button>
     </form>
 
-    <p class="hint">测试接口：<code>POST /api/chat</code>，请求体 <code>{"conversationId": null, "message": "你好"}</code></p>
+    <p class="hint">会话 id 存在浏览器 localStorage 里，刷新页面会自动恢复最近 10 轮记录。</p>
   </div>
 
   <script>
-    // 拿到页面上三个关键元素：表单、输入框、消息容器
+    // ------------------------------------------------------------------
+    // 1. 页面元素与状态
+    // ------------------------------------------------------------------
     const form = document.getElementById('chat-form');
     const input = document.getElementById('message');
     const messages = document.getElementById('messages');
+    const sendButton = document.getElementById('send-button');
+    const newChatButton = document.getElementById('new-chat');
+    const sessionLabel = document.getElementById('session-label');
 
-    // 当前会话 id：null 表示还没有会话，后端会新建一个并返回
-    // 只存在页面内存里，刷新浏览器就重置（M0.5 会改成存 localStorage）
-    let conversationId = null;
+    // localStorage 的 key：换名字等于换一份会话记录
+    const STORAGE_KEY = 'firstm0.conversationId';
 
-    // 监听表单提交：用户点“发送”或按回车都会走到这里
+    // 当前会话 id：优先从 localStorage 恢复，没有就是 null（后端会新建）
+    let conversationId = readStoredConversationId();
+
+    // 页面打开时，如果之前有会话，就把历史消息拉回来
+    restoreHistory();
+
+    // ------------------------------------------------------------------
+    // 2. 发送消息
+    // ------------------------------------------------------------------
     form.addEventListener('submit', async (event) => {
       event.preventDefault();            // 阻止浏览器默认的“整页刷新”提交行为
       const text = input.value.trim();   // 去掉首尾空格
@@ -208,12 +266,15 @@
       addBubble(text, 'user');           // 先把用户的话画成气泡（乐观显示，不用等后端）
       input.value = '';                  // 清空输入框
 
+      // 进入 loading 状态：禁止重复提交，并显示“正在输入”
+      setBusy(true);
+      const typingBubble = addBubble('正在输入…', 'typing');
+
       try {
-        // 调后端接口：POST + JSON 请求体（不再是 GET 拼 URL 参数了）
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // 带上会话 id：第一次是 null（后端会新建），之后一直复用同一个 id
+          // 带上会话 id：第一次是 null，之后一直复用同一个 id
           body: JSON.stringify({ conversationId: conversationId, message: text })
         });
 
@@ -223,22 +284,110 @@
           throw new Error(errorBody?.message || 'HTTP ' + response.status);
         }
 
-        const data = await response.json();      // 解析出 {"conversationId": 1, "reply": "..."}
-        conversationId = data.conversationId;    // 记住会话 id，下一句就接着这个会话聊
-        addBubble(data.reply, 'bot');            // 把后端回复画成机器人气泡
+        const data = await response.json();
+        conversationId = data.conversationId;   // 记住会话 id，下一句接着聊
+        storeConversationId(conversationId);    // 存进 localStorage，刷新也不丢
+        updateSessionLabel();
+
+        typingBubble.remove();                  // 收到回复，移除“正在输入”气泡
+        addBubble(data.reply, 'bot');
       } catch (error) {
-        // 断网或后端报错时给出提示，避免页面“点了没反应”
-        addBubble('请求失败：' + error.message, 'bot');
+        typingBubble.remove();
+        addBubble('请求失败：' + error.message + '\n（检查后端是否启动，然后重试）', 'bot');
+      } finally {
+        setBusy(false);
+        input.focus();
       }
     });
 
-    // 往消息区追加一个气泡；role 决定气泡靠左（bot）还是靠右（user）
+    // ------------------------------------------------------------------
+    // 3. 新对话
+    // ------------------------------------------------------------------
+    newChatButton.addEventListener('click', () => {
+      conversationId = null;
+      localStorage.removeItem(STORAGE_KEY);   // 清掉记住的 id，下次会新建会话
+
+      // 清空消息区，只留一句欢迎语
+      messages.innerHTML = '';
+      addBubble('已开始新对话，之前的记录还在数据库里，只是这个页面不再接着聊。', 'bot');
+      updateSessionLabel();
+      input.focus();
+    });
+
+    // ------------------------------------------------------------------
+    // 4. 刷新恢复：按 conversationId 拉历史消息
+    // ------------------------------------------------------------------
+    async function restoreHistory() {
+      if (conversationId === null) {
+        updateSessionLabel();
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/conversations/' + conversationId + '/messages');
+
+        // 404 说明这个会话在数据库里已经不存在了，清掉本地记录，当新会话处理
+        if (response.status === 404) {
+          conversationId = null;
+          localStorage.removeItem(STORAGE_KEY);
+          updateSessionLabel();
+          return;
+        }
+
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+
+        const history = await response.json();
+        if (history.length === 0) return;
+
+        messages.innerHTML = '';   // 去掉欢迎语，换成真实历史
+        history.forEach((item) => {
+          addBubble(item.content, item.role === 'USER' ? 'user' : 'bot');
+        });
+      } catch (error) {
+        // 恢复失败不影响继续聊天，只在控制台留个记录
+        console.warn('恢复历史失败：', error.message);
+        updateSessionLabel();
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // 5. 小工具函数
+    // ------------------------------------------------------------------
+
+    // 往消息区追加一个气泡，并返回这个元素（方便之后删除“正在输入”）
     function addBubble(text, role) {
       const div = document.createElement('div');
-      div.className = 'bubble ' + role;              // 用 class 控制样式和左右对齐
-      div.textContent = text;                        // 用 textContent 而不是 innerHTML，可避免 XSS
+      div.className = 'bubble ' + role;
+      div.textContent = text;   // 用 textContent 而不是 innerHTML，可避免 XSS
       messages.appendChild(div);
-      messages.scrollTop = messages.scrollHeight;    // 滚到最底部，保证能看到最新消息
+      messages.scrollTop = messages.scrollHeight;
+      return div;
+    }
+
+    // 切换“发送中”状态
+    function setBusy(busy) {
+      sendButton.disabled = busy;
+      input.disabled = busy;
+      sendButton.textContent = busy ? '发送中…' : '发送';
+    }
+
+    // 右上角显示当前会话编号
+    function updateSessionLabel() {
+      sessionLabel.textContent = conversationId === null ? '新会话' : '会话 #' + conversationId;
+    }
+
+    // 读取 localStorage 里存的会话 id；没有或格式不对就返回 null
+    function readStoredConversationId() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = Number(raw);
+
+      return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+    }
+
+    function storeConversationId(id) {
+      if (id !== null && id !== undefined) {
+        localStorage.setItem(STORAGE_KEY, String(id));
+      }
     }
   </script>
 </body>

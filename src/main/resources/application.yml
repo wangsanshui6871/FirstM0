@@ -27,6 +27,15 @@ spring:
     # 也能避免启动时那行 "spring.jpa.open-in-view is enabled by default" 警告。
     open-in-view: false
 
+  # M0.5 新增：静态资源缓存策略
+  web:
+    resources:
+      cache:
+        # 开发阶段让浏览器每次都来问一下页面有没有更新，
+        # 否则改了 index.html 刷新也看不到新版本（需要 Ctrl+F5 才行）。
+        # 上线时再按需调大这个值。
+        period: 0
+
 server:
   # 内嵌 Tomcat 的监听端口；页面和接口都从 http://localhost:8080 访问
   port: 8080

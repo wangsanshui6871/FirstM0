@@ -13,7 +13,7 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 
 ## 2. 当前真实状态
 
-已完成（M0 骨架 + M0.1 + M0.2 + M0.3 + M0.4）：
+已完成（M0 骨架 + M0.1 + M0.2 + M0.3 + M0.4 + M0.5）：
 
 - Java 21
 - Spring Boot 3.5.16
@@ -26,14 +26,13 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 - 大模型：`llm/LlmClient`、`llm/LlmMessage`、`llm/LlmException`、`llm/OpenAiCompatibleClient`
 - 上下文控制：最近 10 条消息、总字符上限 4000，超出丢最早的
 - 配置：`config/LlmProperties`，Key 只走 `LLM_API_KEY` 环境变量
-- 静态聊天页 `src/main/resources/static/index.html`（同一页面复用 `conversationId`）
+- 静态聊天页 `src/main/resources/static/index.html`（localStorage 记会话、刷新恢复历史、loading、错误提示、新对话）
 - 18 个测试：上下文启动、hello、chat 正常/空消息/超长、历史 200/404、数据库与上下文 7 个、模型客户端 4 个
 - README、`docs/PROJECT_PLAN.md`
 
 尚未完成：
 
 - 登录
-- 聊天页的 loading / 新对话 / localStorage 恢复（M0.5）
 - RAG 知识库
 - 转人工工单
 - 管理后台
@@ -126,19 +125,18 @@ mvn spring-boot:run
 
 ## 8. 任务进度
 
-**M0.4 已完成**（最近 10 条 + 4000 字符上下文控制 + 18 个测试）。
+**M0.5 已完成**（localStorage 会话记忆 + 刷新恢复历史 + loading + 错误提示 + 新对话按钮）。
 
-**下一步任务：M0.5** —— 把静态页改成真正可用的聊天页。
+**下一步任务：M1** —— 产品化：JWT 登录、会话列表、SSE 流式输出、Docker。
 
-要求与验收标准见 `docs/PROJECT_PLAN.md` 的「M0.5 聊天页」一节，此处不重复。
+要求与验收标准见 `docs/PROJECT_PLAN.md` 的「M1 产品化」一节，此处不重复。
 
-M0.5 范围提醒：
+M1 范围提醒：
 
-- `conversationId` 存 `localStorage`，刷新后能恢复当前会话
-- 加 loading 状态和错误提示
-- 加“新对话”按钮
-- 原生 HTML/CSS/JS，不引入前端框架
-- 不顺手做登录、SSE、RAG
+- 先做 JWT 登录，再做会话列表，最后做 SSE
+- SSE 教学顺序：假流式 → 接真实模型流式 → 处理断线/取消
+- Docker 放在 M1 最后
+- 不引入 Redis、消息队列、微服务
 
 ## 9. 相关文档
 
