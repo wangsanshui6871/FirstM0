@@ -10,6 +10,7 @@ import org.springframework.web.client.RestClient;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -28,6 +29,12 @@ class OpenAiCompatibleClientTest {
 
     private static final String SYSTEM_PROMPT = "你是客服助手";
     private static final String USER_MESSAGE = "你好";
+
+    /** 每次请求都用同一组消息，省得每个用例重复写。 */
+    private static final List<LlmMessage> MESSAGES = List.of(
+            LlmMessage.system(SYSTEM_PROMPT),
+            LlmMessage.user(USER_MESSAGE)
+    );
 
     private HttpServer server;
     private String baseUrl;
@@ -78,7 +85,7 @@ class OpenAiCompatibleClientTest {
 
         LlmClient client = newClient("test-key");
 
-        assertThat(client.chat(SYSTEM_PROMPT, USER_MESSAGE)).isEqualTo("你好，我是客服助手");
+        assertThat(client.chat(MESSAGES)).isEqualTo("你好，我是客服助手");
     }
 
     /**
@@ -93,7 +100,7 @@ class OpenAiCompatibleClientTest {
 
         LlmClient client = newClient("test-key");
 
-        assertThatThrownBy(() -> client.chat(SYSTEM_PROMPT, USER_MESSAGE))
+        assertThatThrownBy(() -> client.chat(MESSAGES))
                 .isInstanceOf(LlmException.class)
                 .hasMessageContaining("空回复");
     }
@@ -110,7 +117,7 @@ class OpenAiCompatibleClientTest {
 
         LlmClient client = newClient("test-key");
 
-        assertThatThrownBy(() -> client.chat(SYSTEM_PROMPT, USER_MESSAGE))
+        assertThatThrownBy(() -> client.chat(MESSAGES))
                 .isInstanceOf(LlmException.class)
                 .hasMessageContaining("模型调用失败");
     }
@@ -125,7 +132,7 @@ class OpenAiCompatibleClientTest {
 
         LlmClient client = newClient("");
 
-        assertThatThrownBy(() -> client.chat(SYSTEM_PROMPT, USER_MESSAGE))
+        assertThatThrownBy(() -> client.chat(MESSAGES))
                 .isInstanceOf(LlmException.class)
                 .hasMessageContaining("LLM_API_KEY");
     }

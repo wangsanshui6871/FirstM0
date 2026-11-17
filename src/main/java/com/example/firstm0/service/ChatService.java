@@ -8,6 +8,7 @@ import com.example.firstm0.dto.ChatResponse;
 import com.example.firstm0.dto.MessageResponse;
 import com.example.firstm0.llm.LlmClient;
 import com.example.firstm0.llm.LlmException;
+import com.example.firstm0.llm.LlmMessage;
 import com.example.firstm0.repository.ConversationRepository;
 import com.example.firstm0.repository.MessageRepository;
 import org.slf4j.Logger;
@@ -17,6 +18,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -49,8 +52,17 @@ public class ChatService {
     private static final int MAX_TITLE_LENGTH = 100;
 
     /**
+     * 历史总字符预算。
+     *
+     * <p>为什么要限制：上下文越长，模型调用越慢、越贵，
+     * 而且超过模型的上下文窗口后接口会直接报错。
+     * 4000 字符对客服场景够用，也能把成本控制住。
+     */
+    private static final int MAX_HISTORY_CHARS = 4000;
+
+    /**
      * 系统提示词：规定模型的角色和边界。
-     * M0.4 会在这里加上历史消息，M2 会加上知识库资料。
+     * M0.4 起和历史消息一起发给模型，M2 会再加上知识库资料。
      */
     private static final String SYSTEM_PROMPT = """
             你是「FirstM0」的客服助手。
@@ -90,8 +102,8 @@ public class ChatService {
         Long savedConversationId = Objects.requireNonNull(
                 transactionTemplate.execute(status -> saveUserTurn(conversationId, userMessage)));
 
-        // 第 2 段：事务外，等模型返回；这一步可能很慢，但不占用数据库连接
-        String reply = generateReply(userMessage);
+        // 第 2 段：事务外，组装上下文并等模型返回；可能很慢，但不占用数据库连接
+        String reply = generateReply(buildPrompt(savedConversationId));
 
         // 第 3 段：事务内，存机器人回复并刷新会话更新时间
         transactionTemplate.executeWithoutResult(status -> saveAssistantTurn(savedConversationId, reply));
@@ -141,14 +153,69 @@ public class ChatService {
     }
 
     /**
+     * 组装发给模型的消息列表：system prompt + 历史对话。
+     *
+     * <p>当前这条用户消息已经在上一步存进数据库了，
+     * 所以查最近 10 条时它就在里面，不需要再单独追加。
+     *
+     * <p>裁剪规则（M0.4 的核心）：
+     * <ol>
+     *   <li>先取最近 10 条（由 Repository 的 findTop10 保证）；</li>
+     *   <li>从最新往旧累加字符，总数超过 4000 就不再往前取；</li>
+     *   <li>最新的一条无论多长都要保留，保证模型至少看到当前问题；</li>
+     *   <li>最后翻回时间正序——模型需要按“先说 → 后说”的顺序读。</li>
+     * </ol>
+     * 这样上下文长度有上限，token 成本不会随对话轮数无限增长。
+     */
+    private List<LlmMessage> buildPrompt(Long conversationId) {
+        // 查出来是“最新在前”，先复制一份可变列表，避免直接改数据库返回的集合
+        List<Message> recent = new ArrayList<>(
+                messageRepository.findTop10ByConversationIdOrderByIdDesc(conversationId));
+
+        List<LlmMessage> history = new ArrayList<>();
+        int totalChars = 0;
+
+        for (int i = 0; i < recent.size(); i++) {
+            Message message = recent.get(i);
+            int length = message.getContent().length();
+
+            // history 非空说明最新那条已经装进去了，这时候才允许因为超预算而停止
+            if (!history.isEmpty() && totalChars + length > MAX_HISTORY_CHARS) {
+                break;
+            }
+
+            history.add(toLlmMessage(message));
+            totalChars += length;
+        }
+
+        // 上面是“新 → 旧”，翻成“旧 → 新”再发给模型
+        Collections.reverse(history);
+
+        List<LlmMessage> messages = new ArrayList<>(history.size() + 1);
+        messages.add(LlmMessage.system(SYSTEM_PROMPT));
+        messages.addAll(history);
+
+        log.debug("组装上下文：共 {} 条消息，历史字符数 {}", messages.size(), totalChars);
+
+        return messages;
+    }
+
+    /** 把数据库实体转成模型消息；角色只有两种，直接映射。 */
+    private LlmMessage toLlmMessage(Message message) {
+        return message.getRole() == MessageRole.USER
+                ? LlmMessage.user(message.getContent())
+                : LlmMessage.assistant(message.getContent());
+    }
+
+    /**
      * 调用大模型生成回复。
      *
      * <p>失败不抛给前端：记一条 WARN 日志，返回兜底话术。
      * 这样用户至少能看到“系统忙”，而不是一个 500 页面。
      */
-    private String generateReply(String userMessage) {
+    private String generateReply(List<LlmMessage> messages) {
         try {
-            return llmClient.chat(SYSTEM_PROMPT, userMessage);
+            return llmClient.chat(messages);
         } catch (LlmException exception) {
             log.warn("大模型调用失败，改用兜底回复: {}", exception.getMessage());
 

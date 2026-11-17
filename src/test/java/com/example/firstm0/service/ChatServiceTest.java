@@ -1,23 +1,30 @@
 package com.example.firstm0.service;
 
 import com.example.firstm0.common.ConversationNotFoundException;
+import com.example.firstm0.domain.Conversation;
 import com.example.firstm0.domain.Message;
 import com.example.firstm0.domain.MessageRole;
 import com.example.firstm0.dto.ChatResponse;
 import com.example.firstm0.llm.LlmClient;
 import com.example.firstm0.llm.LlmException;
+import com.example.firstm0.llm.LlmMessage;
+import com.example.firstm0.repository.ConversationRepository;
 import com.example.firstm0.repository.MessageRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -38,6 +45,9 @@ class ChatServiceTest {
     @Autowired
     private MessageRepository messageRepository;
 
+    @Autowired
+    private ConversationRepository conversationRepository;
+
     /** 假的模型客户端，由每个测试自己决定返回什么。 */
     @MockitoBean
     private LlmClient llmClient;
@@ -47,7 +57,7 @@ class ChatServiceTest {
      */
     @Test
     void createsConversationAndSavesTwoMessages() {
-        when(llmClient.chat(anyString(), anyString())).thenReturn("你好，我是客服助手，有什么可以帮你？");
+        when(llmClient.chat(anyList())).thenReturn("你好，我是客服助手，有什么可以帮你？");
 
         ChatResponse response = chatService.chat(null, "你好");
 
@@ -67,7 +77,7 @@ class ChatServiceTest {
      */
     @Test
     void appendsMessagesToExistingConversation() {
-        when(llmClient.chat(anyString(), anyString())).thenReturn("好的");
+        when(llmClient.chat(anyList())).thenReturn("好的");
 
         ChatResponse first = chatService.chat(null, "你好");
         ChatResponse second = chatService.chat(first.conversationId(), "再见");
@@ -80,13 +90,72 @@ class ChatServiceTest {
     }
 
     /**
+     * M0.4 的核心：第二轮请求必须把第一轮的内容一起发给模型，
+     * 否则模型读不懂“那运费谁出”里的“那”指什么。
+     */
+    @Test
+    void sendsPreviousTurnsToModel() {
+        when(llmClient.chat(anyList())).thenReturn("7 天无理由退货");
+
+        ChatResponse first = chatService.chat(null, "你们支持退货吗");
+        chatService.chat(first.conversationId(), "那运费谁出");
+
+        List<LlmMessage> prompt = capturePromptOfSecondCall();
+
+        // system + 第一轮用户 + 第一轮回复 + 当前问题 = 4 条
+        assertThat(prompt).hasSize(4);
+        assertThat(prompt.get(0).role()).isEqualTo("system");
+        assertThat(prompt.get(1).role()).isEqualTo("user");
+        assertThat(prompt.get(1).content()).isEqualTo("你们支持退货吗");
+        assertThat(prompt.get(2).role()).isEqualTo("assistant");
+        assertThat(prompt.get(2).content()).isEqualTo("7 天无理由退货");
+        assertThat(prompt.get(3).role()).isEqualTo("user");
+        assertThat(prompt.get(3).content()).isEqualTo("那运费谁出");
+    }
+
+    /**
+     * 历史总字符超过 4000 时，应从最早的消息开始丢，保证成本可控。
+     *
+     * <p>构造 5 条 1001 字的历史，加上当前问题 4 字：
+     * 从新往旧装，装 3 条历史就超过 4000，所以最终只有
+     * system + 3 条历史 + 当前问题 = 5 条。
+     */
+    @Test
+    void dropsOldestMessagesWhenOverCharacterBudget() {
+        when(llmClient.chat(anyList())).thenReturn("好");
+
+        LocalDateTime now = LocalDateTime.now();
+        Conversation conversation = conversationRepository.save(new Conversation("长对话测试", now));
+
+        for (int i = 0; i < 5; i++) {
+            MessageRole role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
+            messageRepository.save(new Message(
+                    conversation.getId(), role, "长".repeat(1000) + i, now));
+        }
+
+        chatService.chat(conversation.getId(), "当前问题");
+
+        // 这个用例只调用了一次模型，直接捕获那一次
+        List<LlmMessage> prompt = captureOnlyPrompt();
+
+        assertThat(prompt).hasSize(5);
+        assertThat(prompt.get(0).role()).isEqualTo("system");
+        // 最早保留下来的应该是第 3 条历史（下标 2），第 1、2 条被丢掉
+        assertThat(prompt.get(1).content()).endsWith("2");
+        // 最后一条永远是当前问题
+        assertThat(prompt.get(4).content()).isEqualTo("当前问题");
+
+        int totalChars = prompt.stream().skip(1).mapToInt(message -> message.content().length()).sum();
+        assertThat(totalChars).isLessThanOrEqualTo(4000 + 4);
+    }
+
+    /**
      * 模型调用失败：不应把异常抛给前端，而是返回兜底话术，
      * 并且这条兜底话术也要落库，保证历史记录完整。
      */
     @Test
     void returnsFallbackReplyWhenLlmFails() {
-        when(llmClient.chat(anyString(), anyString()))
-                .thenThrow(new LlmException("模型调用失败：timeout"));
+        when(llmClient.chat(anyList())).thenThrow(new LlmException("模型调用失败：timeout"));
 
         ChatResponse response = chatService.chat(null, "你们支持退货吗");
 
@@ -114,5 +183,28 @@ class ChatServiceTest {
     void listMessagesThrowsWhenConversationDoesNotExist() {
         assertThatThrownBy(() -> chatService.listMessages(999L))
                 .isInstanceOf(ConversationNotFoundException.class);
+    }
+
+    /**
+     * 捕获“第二次调用模型时传进去的消息列表”。
+     *
+     * <p>第一次调用是用户的第一句话，第二次才是带上下文的请求。
+     * 用 Mockito 的 ArgumentCaptor 把参数截下来，就能检查 Service 到底发了什么。
+     */
+    @SuppressWarnings("unchecked")
+    private List<LlmMessage> capturePromptOfSecondCall() {
+        ArgumentCaptor<List<LlmMessage>> captor = ArgumentCaptor.forClass(List.class);
+        verify(llmClient, times(2)).chat(captor.capture());
+
+        return captor.getAllValues().get(1);
+    }
+
+    /** 捕获唯一一次模型调用的参数。 */
+    @SuppressWarnings("unchecked")
+    private List<LlmMessage> captureOnlyPrompt() {
+        ArgumentCaptor<List<LlmMessage>> captor = ArgumentCaptor.forClass(List.class);
+        verify(llmClient).chat(captor.capture());
+
+        return captor.getValue();
     }
 }

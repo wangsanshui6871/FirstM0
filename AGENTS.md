@@ -13,26 +13,27 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 
 ## 2. 当前真实状态
 
-已完成（M0 骨架 + M0.1 + M0.2 + M0.3）：
+已完成（M0 骨架 + M0.1 + M0.2 + M0.3 + M0.4）：
 
 - Java 21
 - Spring Boot 3.5.16
 - Maven
 - MySQL 8（库名 `first_m0`）
 - `GET /api/hello`
-- `POST /api/chat`（参数校验 + 会话/消息落库 + 真实大模型回复 + 失败降级）
+- `POST /api/chat`（参数校验 + 会话/消息落库 + 多轮上下文 + 真实大模型回复 + 失败降级）
 - `GET /api/conversations/{id}/messages`（查历史，会话不存在返回 404）
 - 实体 `Conversation`、`Message`、`MessageRole` + 两个 JPA Repository
-- 大模型：`llm/LlmClient`、`llm/LlmException`、`llm/OpenAiCompatibleClient`（RestClient 调 OpenAI 兼容接口）
+- 大模型：`llm/LlmClient`、`llm/LlmMessage`、`llm/LlmException`、`llm/OpenAiCompatibleClient`
+- 上下文控制：最近 10 条消息、总字符上限 4000，超出丢最早的
 - 配置：`config/LlmProperties`，Key 只走 `LLM_API_KEY` 环境变量
-- 静态聊天页 `src/main/resources/static/index.html`（调用 `/api/chat`）
-- 16 个测试：上下文启动、hello、chat 正常/空消息/超长、历史 200/404、数据库读写 5 个、模型客户端 4 个
+- 静态聊天页 `src/main/resources/static/index.html`（同一页面复用 `conversationId`）
+- 18 个测试：上下文启动、hello、chat 正常/空消息/超长、历史 200/404、数据库与上下文 7 个、模型客户端 4 个
 - README、`docs/PROJECT_PLAN.md`
 
 尚未完成：
 
 - 登录
-- 多轮上下文控制
+- 聊天页的 loading / 新对话 / localStorage 恢复（M0.5）
 - RAG 知识库
 - 转人工工单
 - 管理后台
@@ -125,19 +126,19 @@ mvn spring-boot:run
 
 ## 8. 任务进度
 
-**M0.3 已完成**（真实 DeepSeek 回复 + 事务拆分 + 失败降级 + 16 个测试）。
+**M0.4 已完成**（最近 10 条 + 4000 字符上下文控制 + 18 个测试）。
 
-**下一步任务：M0.4** —— 多轮对话，让模型能接着上文回答。
+**下一步任务：M0.5** —— 把静态页改成真正可用的聊天页。
 
-要求与验收标准见 `docs/PROJECT_PLAN.md` 的「M0.4 多轮对话」一节，此处不重复。
+要求与验收标准见 `docs/PROJECT_PLAN.md` 的「M0.5 聊天页」一节，此处不重复。
 
-M0.4 范围提醒：
+M0.5 范围提醒：
 
-- 查最近 10 条消息，总字符数控制在 4000 左右
-- system prompt + 历史 + 当前问题一起发给模型
-- 超长时优先丢掉最早的消息
-- 不做摘要压缩，不做向量检索
-- 不改 `LlmClient` 之外的 HTTP 细节
+- `conversationId` 存 `localStorage`，刷新后能恢复当前会话
+- 加 loading 状态和错误提示
+- 加“新对话”按钮
+- 原生 HTML/CSS/JS，不引入前端框架
+- 不顺手做登录、SSE、RAG
 
 ## 9. 相关文档
 

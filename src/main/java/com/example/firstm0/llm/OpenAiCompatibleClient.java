@@ -66,7 +66,7 @@ public class OpenAiCompatibleClient implements LlmClient {
     }
 
     @Override
-    public String chat(String systemPrompt, String userMessage) {
+    public String chat(List<LlmMessage> messages) {
         // 没配 Key 时直接给出明确错误，而不是发一个注定 401 的请求
         if (apiKey == null || apiKey.isBlank()) {
             throw new LlmException("未配置 LLM_API_KEY，请在环境变量里设置后再试");
@@ -74,10 +74,9 @@ public class OpenAiCompatibleClient implements LlmClient {
 
         ChatCompletionRequest request = new ChatCompletionRequest(
                 model,
-                List.of(
-                        new ChatMessage("system", systemPrompt),
-                        new ChatMessage("user", userMessage)
-                ),
+                messages.stream()
+                        .map(message -> new ChatMessage(message.role(), message.content()))
+                        .toList(),
                 TEMPERATURE
         );
 

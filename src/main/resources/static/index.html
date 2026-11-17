@@ -173,16 +173,16 @@
         <h1>FirstM0 <span>AI 客服骨架</span></h1>
         <p>Spring Boot 3.5 · Java 21 · Maven</p>
       </div>
-      <span class="badge">M0.1</span>
+      <span class="badge">M0.3</span>
     </header>
 
     <main id="messages">
       <!-- 消息区：JS 会把用户/机器人气泡动态插入到这里 -->
-      <div class="bubble bot">你好，我是 M0.1 骨架。现在发送消息会调用 <code>POST /api/chat</code>，后端只做固定回复，还没接大模型。</div>
+      <div class="bubble bot">你好，我是 FirstM0 客服助手。发送消息会调用 <code>POST /api/chat</code>，由大模型生成回复，并保存到 MySQL。</div>
     </main>
 
     <form id="chat-form">
-      <input id="message" autocomplete="off" placeholder="输入一句话，测试前后端是否打通…">
+      <input id="message" autocomplete="off" placeholder="输入一句话，和客服助手聊聊…">
       <button type="submit">发送</button>
     </form>
 
@@ -194,6 +194,10 @@
     const form = document.getElementById('chat-form');
     const input = document.getElementById('message');
     const messages = document.getElementById('messages');
+
+    // 当前会话 id：null 表示还没有会话，后端会新建一个并返回
+    // 只存在页面内存里，刷新浏览器就重置（M0.5 会改成存 localStorage）
+    let conversationId = null;
 
     // 监听表单提交：用户点“发送”或按回车都会走到这里
     form.addEventListener('submit', async (event) => {
@@ -209,8 +213,8 @@
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // M0.1 还没有会话概念，conversationId 固定传 null
-          body: JSON.stringify({ conversationId: null, message: text })
+          // 带上会话 id：第一次是 null（后端会新建），之后一直复用同一个 id
+          body: JSON.stringify({ conversationId: conversationId, message: text })
         });
 
         // 非 2xx：后端会返回统一的 { code, message }，优先把 message 展示给用户
@@ -219,7 +223,8 @@
           throw new Error(errorBody?.message || 'HTTP ' + response.status);
         }
 
-        const data = await response.json();      // 解析出 {"conversationId": null, "reply": "..."}
+        const data = await response.json();      // 解析出 {"conversationId": 1, "reply": "..."}
+        conversationId = data.conversationId;    // 记住会话 id，下一句就接着这个会话聊
         addBubble(data.reply, 'bot');            // 把后端回复画成机器人气泡
       } catch (error) {
         // 断网或后端报错时给出提示，避免页面“点了没反应”

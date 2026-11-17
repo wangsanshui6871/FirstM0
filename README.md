@@ -1,17 +1,17 @@
 # FirstM0
 
-M0.3：聊天回复已换成真实大模型（DeepSeek），会话和消息照常落库。模型调用失败时会返回友好提示，不会把错误抛给用户。
+M0.4：支持多轮对话。模型能读到最近的聊天记录，接得上上文；上下文有长度上限，成本不会随轮数无限增长。
 
 当前版本刻意保持很小：
 
 - 一个 Spring Boot 启动类
 - 一个 `GET /api/hello`（骨架验证用）
-- 一个 `POST /api/chat`（参数校验 + 会话/消息落库 + 真实模型回复）
+- 一个 `POST /api/chat`（参数校验 + 落库 + 多轮上下文 + 真实模型回复 + 失败降级）
 - 一个 `GET /api/conversations/{id}/messages`（查历史消息）
-- 一个静态聊天页面
-- 16 个测试（上下文启动、hello、chat 正常/空消息/超长、历史消息 200/404、数据库读写 5 个、模型客户端 4 个）
+- 一个静态聊天页面（同一页面内会复用 conversationId）
+- 18 个测试（上下文启动、hello、chat 正常/空消息/超长、历史 200/404、数据库读写 7 个、模型客户端 4 个）
 
-**现在还没有**：登录、多轮上下文、RAG、Android。这些都在后面的 M0.x / M1 里加。
+**现在还没有**：登录、RAG 知识库、Android。这些都在后面的 M0.5 / M1 / M2 里加。
 
 ## AI 接手入口
 
@@ -103,7 +103,7 @@ GET /api/hello?name=M0
 }
 ```
 
-### 2. 聊天（M0.3）
+### 2. 聊天（M0.4）
 
 ```http
 POST /api/chat
@@ -115,7 +115,7 @@ Content-Type: application/json
 ```json
 {
   "conversationId": null,
-  "message": "你好"
+  "message": "你们支持退货吗"
 }
 ```
 
@@ -123,18 +123,29 @@ Content-Type: application/json
 
 ```json
 {
-  "conversationId": 4,
-  "reply": "你好，我是FirstM0的客服助手，很高兴为你服务。"
+  "conversationId": 16,
+  "reply": "您好，退货政策我这边没有具体信息，这个问题我需要帮你转人工确认。"
 }
 ```
 
+接着聊，把上次返回的 id 带上：
+
+```json
+{
+  "conversationId": 16,
+  "message": "那运费谁出"
+}
+```
+
+模型会结合上文回答「退货运费由谁承担…」，而不是把“那”当成一个孤立的问题。
+
 说明：
 
-- 回复由大模型生成；`system prompt` 规定它只基于已知信息回答，不知道就说转人工
+- 每次只带**最近 10 条**消息，历史总字符数不超过 **4000**，超出时丢掉最早的
+- 当前问题一定会保留，保证模型至少知道你在问什么
 - `conversationId` 为 `null` 时新建会话，响应里返回真实 id
-- 想继续同一段对话，把上次返回的 id 带上即可
 - `conversationId` 不存在时返回 `404`
-- 模型超时、Key 错误、返回为空时，回复会变成兜底话术，接口仍然是 `200`
+- 模型超时、Key 错误、返回为空时，回复变成兜底话术，接口仍然是 `200`
 
 参数校验：
 
@@ -185,6 +196,7 @@ src/main/java/com/example/firstm0/
 │   └── ChatService.java         # 三段式：存消息 → 事务外调模型 → 存回复
 ├── llm/
 │   ├── LlmClient.java           # 模型调用接口（Service 只依赖它）
+│   ├── LlmMessage.java          # 一条模型消息：role + content
 │   ├── LlmException.java        # 把 HTTP 错误/超时/空回复统一成一种异常
 │   └── OpenAiCompatibleClient.java  # 用 RestClient 调 OpenAI 兼容接口
 ├── config/
@@ -227,11 +239,11 @@ src/test/java/com/example/firstm0/
 
 ## 建议先弄懂这 6 个点
 
-1. 为什么要在 `ChatService` 里定义 `LlmClient` 接口，而不是直接写 HTTP 调用？
-2. 为什么调模型不能包在 `@Transactional` 里？数据库连接被长时间占用会怎样？
-3. 为什么同一个类里自己调自己的 `@Transactional` 方法不生效？`TransactionTemplate` 怎么解决？
-4. 超时为什么要分“连接超时”和“读取超时”？各自该设多少？
-5. 模型报错时为什么返回兜底话术，而不是把异常抛给前端？
+1. 什么是上下文窗口？为什么历史不能无限往 prompt 里塞？
+2. 为什么限制“最近 10 条 + 4000 字符”？这两个上限分别在控制什么？
+3. 历史太长时为什么优先丢最早的，而不是丢最新的？
+4. 多轮对话会让 token 成本怎么变化？怎么估算一次对话的花费？
+5. 为什么调模型不能包在 `@Transactional` 里？数据库连接被长时间占用会怎样？
 6. `LLM_API_KEY` 为什么只能走环境变量？日志里为什么不能打印完整 Key？
 
 ## 下一步（按顺序）
@@ -239,8 +251,8 @@ src/test/java/com/example/firstm0/
 - **M0.1**：`POST /api/chat` 固定回复 —— ✅ 已完成
 - **M0.2**：接 MySQL，保存会话和消息 —— ✅ 已完成
 - **M0.3**：接大模型 API，把固定字符串换成真实回复 —— ✅ 已完成
-- **M0.4**：加多轮历史
-- **M0.5**：把静态页改成真正的聊天页
+- **M0.4**：加多轮历史 —— ✅ 已完成
+- **M0.5**：把静态页改成真正的聊天页（loading、错误提示、新对话、localStorage）
 - **M1**：SSE 流式输出、登录、会话列表、Docker
 - **M2**：知识库 RAG、引用、拒答、转人工
 - **M3**：管理后台、工单、评测、部署、演示视频

@@ -22,4 +22,21 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      * @return 该会话的消息列表，没有消息时返回空列表（不是 null）
      */
     List<Message> findByConversationIdOrderByIdAsc(Long conversationId);
+
+    /**
+     * 查某个会话最近的 10 条消息，按 id 倒序（最新的在前）。
+     *
+     * <p>方法名拆开看：
+     * <ul>
+     *   <li>findTop10By：只取前 10 条</li>
+     *   <li>ConversationId：条件是 conversation_id</li>
+     *   <li>OrderByIdDesc：按 id 倒序</li>
+     * </ul>
+     * 生成的 SQL 形如 {@code select ... order by id desc limit 10}。
+     * 用它是因为最新消息最相关，先取最新的，再在 Service 里按字数往前筛。
+     *
+     * @param conversationId 会话 id
+     * @return 最多 10 条消息，最新的排在最前面
+     */
+    List<Message> findTop10ByConversationIdOrderByIdDesc(Long conversationId);
 }
