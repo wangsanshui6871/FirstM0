@@ -1,5 +1,6 @@
 package com.example.firstm0.common;
 
+import com.example.firstm0.auth.TokenInvalidException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -73,5 +74,38 @@ public class GlobalExceptionHandler {
         log.warn("会话不存在: {}", exception.getMessage());
 
         return new ErrorResponse("CONVERSATION_NOT_FOUND", exception.getMessage());
+    }
+
+    /**
+     * 用户名已被占用：409（Conflict）。
+     */
+    @ExceptionHandler(UsernameTakenException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleUsernameTaken(UsernameTakenException exception) {
+        log.info("注册失败，用户名重复: {}", exception.getMessage());
+
+        return new ErrorResponse("USERNAME_TAKEN", exception.getMessage());
+    }
+
+    /**
+     * 登录失败：401（Unauthorized）。
+     */
+    @ExceptionHandler(InvalidCredentialsException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ErrorResponse handleInvalidCredentials(InvalidCredentialsException exception) {
+        log.info("登录失败: {}", exception.getMessage());
+
+        return new ErrorResponse("INVALID_CREDENTIALS", exception.getMessage());
+    }
+
+    /**
+     * token 无效或过期：401，前端收到后应清掉本地 token 并跳回登录页。
+     */
+    @ExceptionHandler(TokenInvalidException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ErrorResponse handleTokenInvalid(TokenInvalidException exception) {
+        log.debug("token 校验失败: {}", exception.getMessage());
+
+        return new ErrorResponse("TOKEN_INVALID", exception.getMessage());
     }
 }

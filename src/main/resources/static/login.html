@@ -1,0 +1,254 @@
+<!doctype html>
+<!--
+  FirstM0 登录页 —— M1.1 版本。
+  职责：注册 / 登录，成功后把 JWT 存进 localStorage，再跳回聊天页。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FirstM0 · 登录</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --danger: #f87171;
+      --ok: #4ade80;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.18), transparent 28%),
+        radial-gradient(circle at 90% 100%, rgba(37, 99, 235, 0.22), transparent 30%),
+        var(--bg);
+    }
+
+    .card {
+      width: min(420px, 100%);
+      padding: 32px;
+      background: rgba(15, 23, 42, 0.82);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 20px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(16px);
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+    }
+
+    .sub {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      padding: 4px;
+      background: rgba(2, 6, 23, 0.5);
+      border-radius: 12px;
+    }
+
+    .tabs button {
+      flex: 1;
+      padding: 9px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .tabs button.active {
+      background: rgba(56, 189, 248, 0.16);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    input {
+      width: 100%;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 12px;
+      outline: none;
+      background: rgba(15, 23, 42, 0.8);
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    input:focus { border-color: var(--accent); }
+
+    .submit {
+      width: 100%;
+      padding: 12px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #082f49;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .submit:hover { filter: brightness(1.08); }
+
+    .submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .msg {
+      min-height: 20px;
+      margin: 16px 0 0;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .msg.error { color: var(--danger); }
+    .msg.success { color: var(--ok); }
+
+    .back {
+      display: block;
+      margin-top: 20px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      text-decoration: none;
+    }
+
+    .back:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>FirstM0</h1>
+    <p class="sub">登录后开始和客服助手对话</p>
+
+    <div class="tabs">
+      <button type="button" id="tab-login" class="active">登录</button>
+      <button type="button" id="tab-register">注册</button>
+    </div>
+
+    <form id="auth-form">
+      <label for="username">用户名</label>
+      <input id="username" autocomplete="username" placeholder="3～50 位字母、数字或下划线">
+
+      <label for="password">密码</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="至少 8 位">
+
+      <button type="submit" class="submit" id="submit-button">登录</button>
+    </form>
+
+    <p class="msg" id="message"></p>
+    <a class="back" href="/">先随便逛逛 →</a>
+  </div>
+
+  <script>
+    // localStorage 里存 token 和用户名，聊天页会读同一个 key
+    const TOKEN_KEY = 'firstm0.token';
+    const USERNAME_KEY = 'firstm0.username';
+
+    const form = document.getElementById('auth-form');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const submitButton = document.getElementById('submit-button');
+    const message = document.getElementById('message');
+    const tabLogin = document.getElementById('tab-login');
+    const tabRegister = document.getElementById('tab-register');
+
+    // 当前模式：login 或 register
+    let mode = 'login';
+
+    // 如果本地已经有 token，说明登录过，直接回聊天页
+    if (localStorage.getItem(TOKEN_KEY)) {
+      location.replace('/');
+    }
+
+    tabLogin.addEventListener('click', () => switchMode('login'));
+    tabRegister.addEventListener('click', () => switchMode('register'));
+
+    function switchMode(next) {
+      mode = next;
+      const isLogin = mode === 'login';
+
+      tabLogin.classList.toggle('active', isLogin);
+      tabRegister.classList.toggle('active', !isLogin);
+      submitButton.textContent = isLogin ? '登录' : '注册';
+      passwordInput.autocomplete = isLogin ? 'current-password' : 'new-password';
+      showMessage('', '');
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+
+      if (!username || !password) {
+        showMessage('用户名和密码都要填', 'error');
+        return;
+      }
+
+      submitButton.disabled = true;
+      submitButton.textContent = mode === 'login' ? '登录中…' : '注册中…';
+      showMessage('', '');
+
+      try {
+        const response = await fetch('/api/auth/' + mode, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: username, password: password })
+        });
+
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(data?.message || 'HTTP ' + response.status);
+        }
+
+        // 保存登录状态：token 给后端验身份，username 只用来在页面显示
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(USERNAME_KEY, data.username);
+
+        showMessage('成功，正在跳转…', 'success');
+        location.href = '/';
+      } catch (error) {
+        showMessage(error.message, 'error');
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = mode === 'login' ? '登录' : '注册';
+      }
+    });
+
+    function showMessage(text, type) {
+      message.textContent = text;
+      message.className = 'msg' + (type ? ' ' + type : '');
+    }
+  </script>
+</body>
+</html>

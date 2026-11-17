@@ -1,7 +1,7 @@
 # FirstM0 项目规划（AI 智能客服）
 
 > 这是项目的主计划。AI 助手先读 `AGENTS.md`，再读本文件。
-> 当前状态：**M0.5 已完成，下一步 M1**。
+> 当前状态：**M1 进行中（M1.1 已完成），下一步 M1.2**。
 > 最后更新：2026-11-17。
 
 ## 0. 这份文档怎么用
@@ -390,26 +390,58 @@ llm:
 - 刷新页面后还能继续
 - 断网/后端报错时有提示
 
-### M1 产品化
+### M1 产品化（进行中）
 
-**目标**：从“能聊天”变成“像个产品”。
+拆成 4 小步，逐个完成：
 
-**功能**：
+| 小步 | 内容 | 状态 |
+|---|---|---|
+| M1.1 | 用户表 + 注册/登录 + JWT | 已完成 |
+| M1.2 | JWT 拦截器 + 会话归属用户 + 会话列表 | 待做 |
+| M1.3 | SSE 流式输出 | 待做 |
+| M1.4 | Docker Compose | 待做 |
 
-- 用户表 + 注册/登录（JWT）
-- 会话列表、重命名、删除
-- SSE 流式输出
-- Docker Compose（app + MySQL）
-- 全局异常、请求日志、traceId
-- 基础限流（可选）
+#### M1.1 注册登录（已完成，2026-11-17）
 
-**SSE 教学顺序**：
+已完成内容：
 
-1. 先做“假流式”：服务端每 100ms 发一个字，前端逐字显示
-2. 再接真实 LLM 流式接口
-3. 最后处理断线、取消、超时
+- 依赖：`spring-security-crypto`（BCrypt）、`jjwt` 0.12.6（签发/校验 JWT）
+- 实体：`domain/User.java`、`domain/UserRole.java`，表名 `app_user`（避开 MySQL 系统库的 `user`）
+- `repository/UserRepository.java`：`existsByUsername`、`findByUsername`
+- `auth/JwtService.java`：HS256 签发与校验，subject 存 userId，claim 存 username
+- `service/AuthService.java`：注册（BCrypt 加密）、登录（`matches` 校验）
+- `controller/AuthController.java`：`POST /api/auth/register`（201）、`POST /api/auth/login`（200）
+- 异常：用户名重复 409、密码错误 401、token 无效 401
+- 页面：`static/login.html`（登录/注册切换），成功后 token 存 localStorage，跳回聊天页
+- 聊天页右上角显示用户名
+- 测试：23 个全部通过（新增 5 个认证用例）
 
-**验收**：
+验收结果：
+
+- [x] `mvn test` 通过（23 个测试）
+- [x] 真实注册返回 201、userId=1、token 长度 178
+- [x] 数据库 `app_user` 表的 `password_hash` 是 `$2a$10$` 开头、长度 60，无明文密码
+- [x] 正确密码登录 200，错误密码 401
+- [x] 重复用户名 409、弱密码 400
+- [x] 能解释 JWT 结构、BCrypt 加盐、为什么登录失败不区分原因
+
+#### M1.2 会话隔离（待做）
+
+- 新增 `auth/AuthInterceptor`：解析 `Authorization: Bearer xxx`，把 userId 放进 request attribute
+- `WebConfig` 注册拦截器，排除 `/api/auth/**` 和静态资源
+- `conversation` 表加 `user_id`，`ChatService` 按当前用户查/建会话
+- 新增 `GET /api/conversations`（会话列表）、`PATCH /api/conversations/{id}`（重命名）、`DELETE /api/conversations/{id}`
+- 前端加会话侧边栏
+
+#### M1.3 SSE（待做）
+
+教学顺序：假流式 → 接真实模型流式 → 处理断线/取消。
+
+#### M1.4 Docker（待做）
+
+`docker compose up` 启动 app + MySQL。
+
+**M1 整体验收**：
 
 - 登录后只能看自己的会话
 - 回答能逐字出现

@@ -92,6 +92,32 @@
       gap: 10px;
     }
 
+    /* 未登录时是“登录”链接，登录后变成用户名 */
+    .user-link {
+      padding: 5px 10px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 12px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .user-link:hover {
+      border-color: rgba(56, 189, 248, 0.4);
+      color: var(--accent);
+    }
+
+    .user-link.logged-in {
+      color: var(--text);
+      cursor: default;
+    }
+
+    .user-link.logged-in:hover {
+      border-color: transparent;
+      color: var(--text);
+    }
+
     /* 次要按钮：透明背景，只在边框上做文章，和主按钮区分开 */
     button.secondary {
       padding: 6px 12px;
@@ -217,6 +243,7 @@
         <p>Spring Boot 3.5 · Java 21 · Maven</p>
       </div>
       <div class="header-actions">
+        <a class="user-link" id="user-link" href="/login.html">登录</a>
         <span class="badge" id="session-label">新会话</span>
         <button type="button" class="secondary" id="new-chat">新对话</button>
       </div>
@@ -245,6 +272,16 @@
     const sendButton = document.getElementById('send-button');
     const newChatButton = document.getElementById('new-chat');
     const sessionLabel = document.getElementById('session-label');
+    const userLink = document.getElementById('user-link');
+
+    // 右上角显示登录状态：有用户名就显示名字，没有就保留“登录”链接
+    const storedUsername = localStorage.getItem('firstm0.username');
+    if (storedUsername) {
+      userLink.textContent = storedUsername;
+      userLink.removeAttribute('href');
+      userLink.classList.add('logged-in');
+      userLink.title = '已登录（M1.2 会做退出登录）';
+    }
 
     // localStorage 的 key：换名字等于换一份会话记录
     const STORAGE_KEY = 'firstm0.conversationId';

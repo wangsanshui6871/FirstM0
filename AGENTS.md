@@ -13,7 +13,7 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 
 ## 2. 当前真实状态
 
-已完成（M0 骨架 + M0.1 + M0.2 + M0.3 + M0.4 + M0.5）：
+已完成（M0 骨架 + M0.1 ~ M0.5 + M1.1）：
 
 - Java 21
 - Spring Boot 3.5.16
@@ -27,17 +27,21 @@ FirstM0 是一个用于求职简历的 **AI 智能客服** 项目：Java 后端�
 - 上下文控制：最近 10 条消息、总字符上限 4000，超出丢最早的
 - 配置：`config/LlmProperties`，Key 只走 `LLM_API_KEY` 环境变量
 - 静态聊天页 `src/main/resources/static/index.html`（localStorage 记会话、刷新恢复历史、loading、错误提示、新对话）
-- 18 个测试：上下文启动、hello、chat 正常/空消息/超长、历史 200/404、数据库与上下文 7 个、模型客户端 4 个
+- 登录页 `src/main/resources/static/login.html`（登录/注册切换）
+- 认证：`domain/User`、`UserRole`、`repository/UserRepository`、`auth/JwtService`、`service/AuthService`、`controller/AuthController`
+- 密码用 BCrypt 加密存库，JWT 走 `jwt.*` 配置，密钥可用 `JWT_SECRET` 覆盖
+- 23 个测试：认证 5 个、上下文启动、hello、chat 3 个、历史 2 个、数据库与上下文 7 个、模型客户端 4 个
 - README、`docs/PROJECT_PLAN.md`
 
 尚未完成：
 
-- 登录
+- 会话按用户隔离、会话列表（M1.2）
+- SSE 流式输出（M1.3）
+- Docker（M1.4）
 - RAG 知识库
 - 转人工工单
 - 管理后台
 - Android
-- Docker
 
 Git 已初始化并推送到 https://github.com/wangsanshui6871/FirstM0（main 分支）。
 
@@ -125,18 +129,19 @@ mvn spring-boot:run
 
 ## 8. 任务进度
 
-**M0.5 已完成**（localStorage 会话记忆 + 刷新恢复历史 + loading + 错误提示 + 新对话按钮）。
+**M1.1 已完成**（注册/登录/JWT，23 个测试）。
 
-**下一步任务：M1** —— 产品化：JWT 登录、会话列表、SSE 流式输出、Docker。
+**下一步任务：M1.2** —— 让会话归属到具体用户。
 
-要求与验收标准见 `docs/PROJECT_PLAN.md` 的「M1 产品化」一节，此处不重复。
+要求见 `docs/PROJECT_PLAN.md` 的「M1.2 会话隔离」一节。
 
-M1 范围提醒：
+M1.2 范围提醒：
 
-- 先做 JWT 登录，再做会话列表，最后做 SSE
-- SSE 教学顺序：假流式 → 接真实模型流式 → 处理断线/取消
-- Docker 放在 M1 最后
-- 不引入 Redis、消息队列、微服务
+- 新增 `auth/AuthInterceptor` + `WebConfig`，排除 `/api/auth/**` 和静态资源
+- `conversation` 表加 `user_id`，老数据没有归属，开发环境可以直接清表
+- 会话列表、重命名、删除一起做
+- 前端加会话侧边栏
+- 不引入 Spring Security 全套过滤链
 
 ## 9. 相关文档
 

@@ -1,17 +1,19 @@
 # FirstM0
 
-M0.5：聊天页可以直接用了——会话 id 记在浏览器里，刷新能恢复历史，发送时有 loading 状态，出错有提示，还能一键开新对话。
+M1.1：支持注册和登录（JWT）。登录状态存在浏览器里，右上角显示用户名。
 
 当前版本刻意保持很小：
 
 - 一个 Spring Boot 启动类
 - 一个 `GET /api/hello`（骨架验证用）
+- `POST /api/auth/register`、`POST /api/auth/login`（BCrypt 加密密码 + 签发 JWT）
 - 一个 `POST /api/chat`（参数校验 + 落库 + 多轮上下文 + 真实模型回复 + 失败降级）
 - 一个 `GET /api/conversations/{id}/messages`（查历史消息）
-- 一个可用的聊天页面（localStorage 记会话、刷新恢复、loading、错误提示、新对话）
-- 18 个测试（上下文启动、hello、chat 正常/空消息/超长、历史 200/404、数据库读写 7 个、模型客户端 4 个）
+- 聊天页（localStorage 记会话、刷新恢复、loading、错误提示、新对话）
+- 登录页（登录/注册切换）
+- 23 个测试（认证 5 个、上下文启动、hello、chat 3 个、历史 2 个、数据库与上下文 7 个、模型客户端 4 个）
 
-**现在还没有**：登录、RAG 知识库、Android。这些都在后面的 M1 / M2 里加。
+**现在还没有**：会话按用户隔离、会话列表、SSE 流式输出、RAG 知识库。这些在 M1.2 / M1.3 / M2 里加。
 
 ## AI 接手入口
 
@@ -88,6 +90,38 @@ IDEA 里还要确认：
 - `Settings → Build Tools → Maven → Runner → JRE` 选 JDK 21
 
 ## 接口
+
+### 0. 注册与登录（M1.1）
+
+```http
+POST /api/auth/register
+POST /api/auth/login
+Content-Type: application/json
+```
+
+请求体：
+
+```json
+{ "username": "testuser01", "password": "password123" }
+```
+
+返回（注册成功是 `201`，登录成功是 `200`）：
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "userId": 1,
+  "username": "testuser01",
+  "role": "USER"
+}
+```
+
+说明：
+
+- 密码用 BCrypt 加密后入库，数据库里只有 `$2a$10$...` 这样的哈希，没有明文
+- 用户名重复返回 `409`，密码错误返回 `401`
+- `token` 有效期 7 天，前端存在 `localStorage` 的 `firstm0.token`
+- 聊天接口目前还不校验 token（M1.2 会加拦截器做会话隔离）
 
 ### 1. 骨架验证
 
@@ -193,21 +227,29 @@ src/main/java/com/example/firstm0/
 │   ├── ChatController.java      # /api/chat
 │   └── ConversationController.java  # /api/conversations/{id}/messages
 ├── service/
-│   └── ChatService.java         # 三段式：存消息 → 事务外调模型 → 存回复
+│   ├── ChatService.java         # 三段式：存消息 → 事务外调模型 → 存回复
+│   └── AuthService.java         # 注册（BCrypt 加密）、登录（校验密码 + 签发 JWT）
+├── auth/
+│   ├── JwtService.java          # 签发和校验 JWT
+│   └── TokenInvalidException.java  # token 无效 -> 401
 ├── llm/
 │   ├── LlmClient.java           # 模型调用接口（Service 只依赖它）
 │   ├── LlmMessage.java          # 一条模型消息：role + content
 │   ├── LlmException.java        # 把 HTTP 错误/超时/空回复统一成一种异常
 │   └── OpenAiCompatibleClient.java  # 用 RestClient 调 OpenAI 兼容接口
 ├── config/
-│   └── LlmProperties.java       # 读取 llm.* 配置
+│   ├── LlmProperties.java       # 读取 llm.* 配置
+│   └── JwtProperties.java       # 读取 jwt.* 配置
 ├── domain/
 │   ├── Conversation.java        # 会话实体 -> conversation 表
 │   ├── Message.java             # 消息实体 -> message 表
-│   └── MessageRole.java         # USER / ASSISTANT
+│   ├── MessageRole.java         # USER / ASSISTANT
+│   ├── User.java                # 用户实体 -> app_user 表
+│   └── UserRole.java            # USER / ADMIN
 ├── repository/
 │   ├── ConversationRepository.java  # 会话表操作
-│   └── MessageRepository.java       # 消息表操作
+│   ├── MessageRepository.java       # 消息表操作
+│   └── UserRepository.java          # 用户表操作
 ├── dto/
 │   ├── HelloResponse.java       # hello 响应对象（record）
 │   ├── ChatRequest.java         # chat 请求体（含参数校验）
@@ -229,6 +271,7 @@ src/test/java/com/example/firstm0/
 ├── FirstM0ApplicationTests.java # 上下文启动测试
 ├── controller/
 │   ├── HelloControllerTest.java # hello 接口测试
+│   ├── AuthControllerTest.java  # 注册/登录/重复用户名/弱密码/密码错误
 │   ├── ChatControllerTest.java  # chat 接口测试（正常 / 空消息 / 超长）
 │   └── ConversationControllerTest.java  # 历史消息 200 / 404
 ├── llm/
@@ -239,21 +282,20 @@ src/test/java/com/example/firstm0/
 
 ## 建议先弄懂这 6 个点
 
-1. `localStorage` 里为什么只存一个会话 id，而不是整段聊天记录？
-2. 刷新页面后恢复历史，用的是哪个接口？如果会话在数据库里被删了会怎样？
-3. 为什么发送时要禁用按钮，而不是只显示一个动画？
-4. 点“新对话”为什么只清本地 id、不删数据库里的记录？
-5. 浏览器缓存会导致“代码改了但页面没变”，后端怎么用 `Cache-Control` 控制这件事？
-6. 为什么调模型不能包在 `@Transactional` 里？数据库连接被长时间占用会怎样？
+1. JWT 的三段结构分别是什么？为什么 payload 不是加密的，却还能防篡改？
+2. BCrypt 为什么每次加密同一个密码结果都不一样？怎么验证密码对不对？
+3. 登录失败为什么统一提示“用户名或密码错误”，而不是区分两种情况？
+4. `@Valid` 为什么只校验注册请求、不校验登录请求的密码长度？
+5. `localStorage` 存 token 有什么风险？换成 Cookie 会怎样？
+6. 为什么这轮不引入 Spring Security 全套？它默认会做什么？
 
 ## 下一步（按顺序）
 
-- **M0.1**：`POST /api/chat` 固定回复 —— ✅ 已完成
-- **M0.2**：接 MySQL，保存会话和消息 —— ✅ 已完成
-- **M0.3**：接大模型 API，把固定字符串换成真实回复 —— ✅ 已完成
-- **M0.4**：加多轮历史 —— ✅ 已完成
-- **M0.5**：把静态页改成真正的聊天页 —— ✅ 已完成
-- **M1**：SSE 流式输出、JWT 登录、会话列表、Docker
+- **M0.1 ~ M0.5** —— ✅ 已完成
+- **M1.1**：注册 / 登录 / JWT —— ✅ 已完成
+- **M1.2**：加 JWT 拦截器，会话归属当前用户（列表、重命名、删除）
+- **M1.3**：SSE 流式输出
+- **M1.4**：Docker Compose
 - **M2**：知识库 RAG、引用、拒答、转人工
 - **M3**：管理后台、工单、评测、部署、演示视频
 

@@ -40,6 +40,14 @@ server:
   # 内嵌 Tomcat 的监听端口；页面和接口都从 http://localhost:8080 访问
   port: 8080
 
+# M1.1 新增：JWT 配置
+jwt:
+  # 签名密钥，HS256 要求至少 32 个字符。
+  # 开发默认值写在代码里，正式环境必须用环境变量 JWT_SECRET 覆盖。
+  secret: ${JWT_SECRET:}
+  # token 有效期（小时），默认 7 天
+  expire-hours: ${JWT_EXPIRE_HOURS:168}
+
 # M0.3 新增：大模型配置
 llm:
   # 模型服务地址；换成其他 OpenAI 兼容服务时改这里即可
